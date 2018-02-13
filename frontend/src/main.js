@@ -1,37 +1,44 @@
 //data
-var lanes = ["Chinese", "Japanese", "Korean"],
-    laneLength = lanes.length,
-    items = [
-        { "lane": 0, "id": "Qin", "start": 5, "end": 205 },
-        { "lane": 0, "id": "Jin", "start": 265, "end": 420 },
-        { "lane": 0, "id": "Sui", "start": 580, "end": 615 },
-        { "lane": 0, "id": "Tang", "start": 620, "end": 900 },
-        { "lane": 0, "id": "Song", "start": 960, "end": 1265 },
-        { "lane": 0, "id": "Yuan", "start": 1270, "end": 1365 },
-        { "lane": 0, "id": "Ming", "start": 1370, "end": 1640 },
-        { "lane": 0, "id": "Qing", "start": 1645, "end": 1910 },
-        { "lane": 1, "id": "Yamato", "start": 300, "end": 530 },
-        { "lane": 1, "id": "Asuka", "start": 550, "end": 700 },
-        { "lane": 1, "id": "Nara", "start": 710, "end": 790 },
-        { "lane": 1, "id": "Heian", "start": 800, "end": 1180 },
-        { "lane": 1, "id": "Kamakura", "start": 1190, "end": 1330 },
-        { "lane": 1, "id": "Muromachi", "start": 1340, "end": 1560 },
-        { "lane": 1, "id": "Edo", "start": 1610, "end": 1860 },
-        { "lane": 1, "id": "Meiji", "start": 1870, "end": 1900 },
-        { "lane": 1, "id": "Taisho", "start": 1910, "end": 1920 },
-        { "lane": 1, "id": "Showa", "start": 1925, "end": 1985 },
-        { "lane": 1, "id": "Heisei", "start": 1990, "end": 1995 },
-        { "lane": 2, "id": "Three Kingdoms", "start": 10, "end": 670 },
-        { "lane": 2, "id": "North and South States", "start": 690, "end": 900 },
-        { "lane": 2, "id": "Goryeo", "start": 920, "end": 1380 },
-        { "lane": 2, "id": "Joseon", "start": 1390, "end": 1890 },
-        { "lane": 2, "id": "Korean Empire", "start": 1900, "end": 1945 }
-    ],
-    timeBegin = 0,
-    timeEnd = 2000;
+var lanes = ["Chinese", "Japanese", "Korean", "Another"];
+var laneLength = lanes.length;
+var items = [
+    { "lane": 0, "id": "Qin", "start": 5, "end": 205 },
+    { "lane": 0, "id": "Jin", "start": 265, "end": 420 },
+    { "lane": 0, "id": "Sui", "start": 580, "end": 615 },
+    { "lane": 0, "id": "Tang", "start": 620, "end": 900 },
+    { "lane": 0, "id": "Song", "start": 960, "end": 1265 },
+    { "lane": 0, "id": "Yuan", "start": 1270, "end": 1365 },
+    { "lane": 0, "id": "Ming", "start": 1370, "end": 1640 },
+    { "lane": 0, "id": "Qing", "start": 1645, "end": 1910 },
+    { "lane": 1, "id": "Yamato", "start": 300, "end": 530 },
+    { "lane": 1, "id": "Asuka", "start": 550, "end": 700 },
+    { "lane": 1, "id": "Nara", "start": 710, "end": 790 },
+    { "lane": 1, "id": "Heian", "start": 800, "end": 1180 },
+    { "lane": 1, "id": "Kamakura", "start": 1190, "end": 1330 },
+    { "lane": 1, "id": "Muromachi", "start": 1340, "end": 1560 },
+    { "lane": 1, "id": "Edo", "start": 1610, "end": 1860 },
+    { "lane": 1, "id": "Meiji", "start": 1870, "end": 1900 },
+    { "lane": 1, "id": "Taisho", "start": 1910, "end": 1920 },
+    { "lane": 1, "id": "Showa", "start": 1925, "end": 1985 },
+    { "lane": 1, "id": "Heisei", "start": 1990, "end": 1995 },
+    { "lane": 2, "id": "Three Kingdoms", "start": 10, "end": 670 },
+    { "lane": 2, "id": "North and South States", "start": 690, "end": 900 },
+    { "lane": 2, "id": "Goryeo", "start": 920, "end": 1380 },
+    { "lane": 2, "id": "Joseon", "start": 1390, "end": 1890 },
+    { "lane": 2, "id": "Korean Empire", "start": 1900, "end": 1945 },
+    { "lane": 3, "id": "Qin", "start": 5, "end": 205 },
+    { "lane": 3, "id": "Jin", "start": 265, "end": 420 },
+    { "lane": 3, "id": "Sui", "start": 580, "end": 615 },
+];
+// for (let i of Array.from(Array(10000).keys())) {
+//     items.push({ "lane": 3, "id": "Tang", "start": 700 + i * 15, "end": 710 + i * 15 });
+// }
+var timeBegin = 0;
+var timeEnd = 10000;
 
+var windowWidth = window.innerWidth;
 var m = [20, 15, 15, 120], //top right bottom left
-    w = 960 - m[1] - m[3],
+    w = windowWidth - m[1] - m[3],
     h = 500 - m[0] - m[2],
     miniHeight = laneLength * 12 + 50,
     mainHeight = h - miniHeight - 50;
@@ -75,14 +82,14 @@ var mini = chart.append("g")
     .attr("class", "mini");
 
 //main lanes and texts
-main.append("g").selectAll(".laneLines")
-    .data(items)
-    .enter().append("line")
-    .attr("x1", m[1])
-    .attr("y1", function (d) { return y1(d.lane); })
-    .attr("x2", w)
-    .attr("y2", function (d) { return y1(d.lane); })
-    .attr("stroke", "lightgray")
+// main.append("g").selectAll(".laneLines")
+//     .data(items)
+//     .enter().append("line")
+//     .attr("x1", m[1])
+//     .attr("y1", function (d) { return y1(d.lane); })
+//     .attr("x2", w)
+//     .attr("y2", function (d) { return y1(d.lane); })
+//     .attr("stroke", "lightgray")
 
 main.append("g").selectAll(".laneText")
     .data(lanes)
@@ -128,16 +135,16 @@ mini.append("g").selectAll("miniItems")
     .attr("height", 10);
 
 //mini labels
-mini.append("g").selectAll(".miniLabels")
-    .data(items)
-    .enter().append("text")
-    .text(function (d) { return d.id; })
-    .attr("x", function (d) { return x(d.start); })
-    .attr("y", function (d) { return y2(d.lane + .5); })
-    .attr("dy", ".5ex");
+// mini.append("g").selectAll(".miniLabels")
+//     .data(items)
+//     .enter().append("text")
+//     .text(function (d) { return d.id; })
+//     .attr("x", function (d) { return x(d.start); })
+//     .attr("y", function (d) { return y2(d.lane + .5); })
+//     .attr("dy", ".5ex");
 
 //brush
-var brush = d3.brushX() // should probably limit the y size here?
+var brush = d3.brushX()
     .extent([[0, 0], [w, miniHeight]])
     // .x(x)
     .on("brush", display);
