@@ -202,7 +202,11 @@ function display() {
     var rects = itemRects.selectAll("rect")
         .data(visItems, function (d: Span) { return d.id; })
         .attr("x", function (d) { return x1(d.start); })
-        .attr("width", function (d) { return x1(d.end) - x1(d.start); });
+        .attr("width", function (d) { return x1(d.end) - x1(d.start); })
+        .on("click", function() {
+            console.log("got clicked");
+        });
+
 
     rects.enter().append("rect")
         .attr("class", function (d) { return "miniItem" + d.lane; })
