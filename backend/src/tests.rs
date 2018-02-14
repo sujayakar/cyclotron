@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::thread;
 use std::time::Duration;
 use futures::{
@@ -15,6 +16,8 @@ use ::{
     TraceFuture,
 };
 
+use json::JsonWriter;
+
 #[test]
 fn test_sync() {
     let _thread = TracedThread::new("test_sync", Box::new(DebugLogger));
@@ -24,7 +27,8 @@ fn test_sync() {
 
 #[test]
 fn test_async() {
-    let _thread = TracedThread::new("test_async", Box::new(DebugLogger));
+    let logger = JsonWriter::new(File::create("/tmp/test.log").unwrap());
+    let _thread = TracedThread::new("test_async", Box::new(logger.clone()));
 
     let (txs, rxs) = (0..10).map(|_| oneshot::channel::<usize>())
         .unzip::<_, _, Vec<_>, Vec<_>>();
@@ -40,8 +44,9 @@ fn test_async() {
         .then(|_: Result<usize, usize>| Ok::<usize, oneshot::Canceled>(12))
         .traced("calm down");
 
+    let logger_ = logger.clone();
     let sender = thread::spawn(move || {
-        let _thread = TracedThread::new("test_async:sender", Box::new(DebugLogger));
+        let _thread = TracedThread::new("test_async:sender", Box::new(logger_));
         thread::sleep(Duration::from_millis(10));
         for (i, tx) in txs.into_iter().enumerate() {
             tx.send(i).unwrap();
@@ -56,4 +61,6 @@ fn test_async() {
         .unwrap();
     sender.join().unwrap();
     assert_eq!(oneshots.iter().sum::<usize>() + okay + calm_down, 67);
+
+    logger.flush();
 }

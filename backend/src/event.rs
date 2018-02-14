@@ -2,7 +2,7 @@ use std::time::Duration;
 use rand;
 use serde_json;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
 pub struct SpanId(pub u64);
 
 impl SpanId {
@@ -11,14 +11,14 @@ impl SpanId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub enum AsyncOutcome {
     Success,
     Cancelled,
     Error(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub enum TraceEvent {
     AsyncStart {
         name: String,
