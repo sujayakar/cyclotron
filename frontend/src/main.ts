@@ -244,7 +244,6 @@ function display() {
             }
         }
     })
-    
     console.log(map);
 
     console.log("Visible items: " + visItems.length);
