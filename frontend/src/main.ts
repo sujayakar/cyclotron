@@ -159,7 +159,7 @@ class Cyclotron {
         // This scales all the spans to share the vertical space when they're fully expanded.
         //
         // We might want to use a fixed height here and scroll instead.
-        var yScale = d3.scaleLinear() // do we need this domain?
+        var yScale = d3.scaleLinear()
             .domain([0, this.nodes().descendants().length])
             .range([0, this.layoutMainHeight]);
 
@@ -180,8 +180,12 @@ class Cyclotron {
             .style("opacity", 1.0);
 
         // If things shift vertically, we animate them to their new positions.
+        //
+        // Note that this cancels the previous transition from when the object was newly created,
+        // so it should match exactly.
         rects.transition()
             .duration(250)
+            .style("opacity", 1.0)
             .attr("y", function (d) { return yScale(map[d.data.id].rowIdx); });
 
         // For new entries, do the things.
