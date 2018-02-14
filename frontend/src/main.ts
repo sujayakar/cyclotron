@@ -163,7 +163,11 @@ class Cyclotron {
             .domain([0, this.nodes().descendants().length])
             .range([0, this.layoutMainHeight]);
 
-
+        let clickHandler = node => { // we should set this up once at the beginning
+            console.log("got clicked: " + node.data.name);
+            node.data.expanded = !node.data.expanded;
+            this.drawMain();
+        };
         // For already-visible spans, make sure they're positioned appropriately.
         //
         // Note that we animate changes on the y-axis, but not the x.
@@ -171,11 +175,7 @@ class Cyclotron {
             .data(visItems, (d: any) => { return d.data.id; })
             .attr("x", function (d) { return x1(d.data.start); })
             .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
-            .on("click", node => { // we should set this up once at the beginning
-                console.log("got clicked: " + node.data.name);
-                node.data.expanded = !node.data.expanded;
-                this.drawMain();
-            })
+            .on("click", clickHandler)
             .style("opacity", 1.0);
 
         rects.transition().duration(300)
@@ -185,11 +185,12 @@ class Cyclotron {
 
         // For new entries, do the things.
         let newRects = rects.enter().append("rect")
-            .attr("class", function (d) { return "miniItem" + d.data.name; })
+            .attr("class", function (d) { return "span"; })
             .attr("x", function (d) { return x1(d.data.start); })
             .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) - 100; })
             .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
             .attr("height", function (d) { return .8 * yScale(1); })
+            .on("click", clickHandler)
             .style("opacity", 0.7);
 
         newRects.transition()
