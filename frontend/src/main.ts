@@ -170,7 +170,8 @@ class Cyclotron {
         };
         // For already-visible spans, make sure they're positioned appropriately.
         //
-        // Note that we animate changes on the y-axis, but not the x.
+        // Note that we animate changes on the y-axis, but not on the x-axis. This is so
+        // that when you scroll side-to-side, things update immediately.
         let rects = this.mainPanel.selectAll("rect") // formerly itemRects
             .data(visItems, (d: any) => { return d.data.id; })
             .attr("x", function (d) { return x1(d.data.start); })
@@ -178,25 +179,25 @@ class Cyclotron {
             .on("click", clickHandler)
             .style("opacity", 1.0);
 
-        rects.transition().duration(300)
-        .attr("y", function (d) {
-            console.log("about to check " + d.data.name);
-            return yScale(map[d.data.id].rowIdx) + 10; });
+        // If things shift vertically, we animate them to their new positions.
+        rects.transition()
+            .duration(250)
+            .attr("y", function (d) { return yScale(map[d.data.id].rowIdx); });
 
         // For new entries, do the things.
         let newRects = rects.enter().append("rect")
             .attr("class", function (d) { return "span"; })
             .attr("x", function (d) { return x1(d.data.start); })
-            .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) - 100; })
+            .attr("y", function (d) { return yScale(map[d.data.id].rowIdx); })
             .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
             .attr("height", function (d) { return .8 * yScale(1); })
             .on("click", clickHandler)
             .style("opacity", 0.7);
 
         newRects.transition()
-            .duration(300)
+            .duration(250)
             .style("opacity", 1.0)
-            .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) + 10; });
+            .attr("y", function (d) { return yScale(map[d.data.id].rowIdx); });
 
         rects.exit().remove();
 
