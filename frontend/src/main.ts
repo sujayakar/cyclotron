@@ -79,12 +79,6 @@ class Cyclotron {
         var windowWidth = window.innerWidth - 10;
         var windowHeight = window.innerHeight - 10;
         
-        // var m = [20, 15, 15, 120], //top right bottom left
-        //     w = windowWidth,
-        //     h = windowHeight - m[0] - m[2], // use constant here? 
-        //     miniHeight = count * 12 + 50, // use constant here?
-        //     mainHeight = h - miniHeight - 50;
-        
         let leftPadding = 100;
         let mainHeight = windowHeight * 0.8;
         this.layoutMainHeight = mainHeight;
@@ -104,148 +98,37 @@ class Cyclotron {
             .domain([0, count]) // this is with everything unexpanded
             .range([0, mainHeight]);
 
-        // console.log(x1);
-
-
-        
-        var chart = d3.select("body")
+        this.svgChart = d3.select("body")
             .append("svg")
             .attr("width", windowWidth)
             .attr("height", windowHeight)
             .attr("class", "chart");
-        this.svgChart = chart;
-        
-        chart.append("defs").append("clipPath")
+        this.svgChart.append("defs")
+            .append("clipPath")
             .attr("id", "clip")
             .append("rect")
             .attr("width", windowWidth)
             .attr("height", mainHeight);
-        
-        var main = chart.append("g")
+        this.mainPanel = this.svgChart.append("g")
             .attr("transform", "translate(" + leftPadding + "," + 0 + ")")
             .attr("width", windowWidth)
             .attr("height", mainHeight)
             .attr("class", "main");
-        this.mainPanel = main;
-        
-        var mini = chart.append("g")
+        this.scrubberPanel = this.svgChart.append("g")
             .attr("transform", "translate(" + leftPadding + "," + mainHeight + ")")
             .attr("width", windowWidth)
             .attr("height", miniHeight)
             .attr("class", "mini");
-        this.scrubberPanel = mini;
 
-        //main lanes and texts
-        // main.append("g").selectAll(".laneLines")
-        //     .data(items)
-        //     .enter().append("line")
-        //     .attr("x1", m[1])
-        //     .attr("yScale", function (d) { return yScale(d.lane); })
-        //     .attr("x2", w)
-        //     .attr("yScaleMini", function (d) { return yScale(d.lane); })
-        //     .attr("stroke", "lightgray")
-        
-        // hierarchies.forEach((hierarchy, idx) => {
-            
-        // });
-        
-        // lane text...
-        // main.append("g").selectAll(".laneText")
-        //     .data(hierarchy.descendants())
-        //     .enter().append("text")
-        //     .text(function (d) { return d.data.name; })
-        //     .attr("x", -m[1])
-        //     .attr("y", function (d, i) { return yScale(i + .5); })
-        //     .attr("dy", ".5ex")
-        //     .attr("text-anchor", "end")
-        //     .attr("class", "laneText");
-        
-        //mini lanes and texts
-        // mini.append("g").selectAll(".laneLines")
-        //     .data(items)
-        //     .enter().append("line")
-        //     .attr("x1", m[1])
-        //     .attr("yScale", function (d) { return yScaleMini(d.lane); })
-        //     .attr("x2", w)
-        //     .attr("yScaleMini", function (d) { return yScaleMini(d.lane); })
-        //     .attr("stroke", "lightgray");
-        
-        // mini.append("g").selectAll(".laneText")
-        //     .data(lanes)
-        //     .enter().append("text")
-        //     .text(function (d) { return d.name; })
-        //     .attr("x", -m[1])
-        //     .attr("y", function (d, i) { return yScaleMini(i + .5); })
-        //     .attr("dy", ".5ex")
-        //     .attr("text-anchor", "end")
-        //     .attr("class", "laneText");
-        
-        var itemRects = main.append("g")
+        var itemRects = this.mainPanel
+            .append("g")
             .attr("clip-path", "url(#clip)");
-        
-            /*
-        // Compute the layout.
-        let map = {};
-        let index = -1;
-        console.log(hierarchy.descendants());
-        hierarchy.eachBefore(n => {
-            map[n.data.id] = {
-                rowIdx: ++index
-            }
-        })
-        console.log(map);
-        
-        //mini item rects
-        mini.append("g")
-            .selectAll("miniItems") // why do we filter by miniItems? what does this do?
-            .data(hierarchy.descendants())
-            .enter().append("rect")
-            .attr("class", function (d) { return "miniItem" + d.data.name; })
-            .attr("x", function (d) { return x(d.data.start); })
-            .attr("y", function (n) { 
-                console.log("1querying " + n.data.id);
-                return yScaleMini(map[n.data.id].rowIdx) - 5; })
-            .attr("width", function (d) { return x(d.data.end - d.data.start); })
-            .attr("height", 10);
-        
-        //mini labels
-        // mini.append("g").selectAll(".miniLabels")
-        //     .data(items)
-        //     .enter().append("text")
-        //     .text(function (d) { return d.id; })
-        //     .attr("x", function (d) { return x(d.start); })
-        //     .attr("y", function (d) { return yScaleMini(d.lane + .5); })
-        //     .attr("dy", ".5ex");
-        
-        
-        var brush = d3.brushX()
-            .extent([[0, 0], [windowWidth - leftPadding, miniHeight]])
-            // .x(x)
-            .on("brush", display);
-        
-        mini.append("g")
-            .attr("class", "x brush")
-            .call(brush)
-            .selectAll("rect")
-            .attr("y", 0)
-            .attr("height", miniHeight);
-        
-        // mini.append("g")
-        //     .attr("class", "brush");
-        // .call(brush);
-        // .call(brush.move, [[307, 167], [611, 539]]);
-        
-        // display();
-        */
         
         var minExtent;
         var maxExtent;
         
         function display() {
             console.log(d3.event);
-            // var labels,
-            //     minExtent = brush.extent()[0],
-            //     maxExtent = brush.extent()[1];
         
             if (d3.event.selection !== undefined) {
                 // move this to only fire on brush moves
@@ -283,9 +166,7 @@ class Cyclotron {
         
             console.log("Visible items: " + visItems.length);
             // console.log(d3.event.selection.map(x.invert));
-            // mini.select(".brush")
-            //     .call(brush.extent([minExtent, maxExtent]));
-        
+
             x1.domain([minExtent, maxExtent]);
         
             //update main item rects
@@ -354,15 +235,6 @@ class Cyclotron {
     }
 
     private drawScrubber(display_fn) {
-
-        var timeBegin = 0;
-        var timeEnd = 10000;
-        
-        //scales
-        var x = d3.scaleLinear()
-            .domain([timeBegin, timeEnd])
-            .range([0, this.layoutMainWidth]);
-
         // Compute the layout.
         let map = {};
         let index = -1;
@@ -377,32 +249,23 @@ class Cyclotron {
         
         let count: number = hierarchy.descendants().length;
 
+        // In the scrubber we always show everything expanded (for now).
         var yScaleMini = d3.scaleLinear()
-        .domain([0, count]) // this is with everything unexpanded
-        .range([0, this.layoutScrubberHeight]);
+            .domain([0, count])
+            .range([0, this.layoutScrubberHeight]);
 
         //mini item rects
         this.scrubberPanel.append("g")
             .selectAll("miniItems") // why do we filter by miniItems? what does this do?
             .data(hierarchy.descendants())
             .enter().append("rect")
-            .attr("class", function (d) { return "miniItem" + d.data.name; })
-            .attr("x", function (d) { return x(d.data.start); })
+            .attr("class", d => { return "miniItem" + d.data.name; })
+            .attr("x", d => { return this.scaleX(d.data.start); })
             .attr("y", function (n) { 
                 console.log("1querying " + n.data.id);
                 return yScaleMini(map[n.data.id].rowIdx) - 5; })
-            .attr("width", function (d) { return x(d.data.end - d.data.start); })
+            .attr("width", d => { return this.scaleX(d.data.end - d.data.start); })
             .attr("height", 10);
-        
-        //mini labels
-        // mini.append("g").selectAll(".miniLabels")
-        //     .data(items)
-        //     .enter().append("text")
-        //     .text(function (d) { return d.id; })
-        //     .attr("x", function (d) { return x(d.start); })
-        //     .attr("y", function (d) { return yScaleMini(d.lane + .5); })
-        //     .attr("dy", ".5ex");
-        
         
         var brush = d3.brushX()
             .extent([[0, 0], [this.layoutMainWidth, this.layoutScrubberHeight]])
