@@ -203,6 +203,18 @@ function display() {
     var visItems = hierarchy.descendants().filter(function (d) {
         return d.data.start < maxExtent && d.data.end > minExtent;
     });
+    // Compute a new order based on what's visible.
+    var map = {};
+    var index = -1;
+    hierarchy.eachBefore(function (n) {
+        console.log("computing for " + n.data.name);
+        if (n.data.start < maxExtent && n.data.end > minExtent) {
+            map[n.data.id] = {
+                rowIdx: ++index
+            };
+        }
+    });
+    console.log(map);
     console.log("Visible items: " + visItems.length);
     // console.log(d3.event.selection.map(x.invert));
     // mini.select(".brush")
@@ -211,8 +223,15 @@ function display() {
     //update main item rects
     // For already-visible spans, make sure they're sized appropriately.
     var rects = itemRects.selectAll("rect")
-        .data(visItems, function (d) { return d.data.id; })
+        .data(visItems, function (d) {
+        console.log("key" + d.data.id);
+        return d.data.id;
+    })
         .attr("x", function (d) { return x1(d.data.start); })
+        .attr("y", function (d) {
+        console.log("about to check " + d.data.name);
+        return yScale(map[d.data.id].rowIdx) + 10;
+    })
         .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
         .on("click", function (node) {
         console.log("got clicked: " + node.data.name);
@@ -226,15 +245,16 @@ function display() {
         .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) - 100; })
         .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
         .attr("height", function (d) { return .8 * yScale(1); })
-        .style("opacity", 0.5);
+        .style("opacity", 0.7);
     newRects.transition()
-        .duration(200)
+        .duration(300)
         .style("opacity", 1)
         .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) + 10; });
     rects.exit().remove();
     // same deal w/ the text
     var labels = itemRects.selectAll("text")
         .data(visItems, function (d) { return d.data.id; })
+        .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) + 20; })
         .attr("x", function (d) { return x1(Math.max(d.data.start, minExtent)); });
     labels.enter().append("text")
         .text(function (d) { return d.data.name; })

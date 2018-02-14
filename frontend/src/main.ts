@@ -220,7 +220,7 @@ function display() {
 
     // console.log(d3.event.selection);
     // is this bad to be recomputing the hierachy here?
-    var hierarchy = d3.hierarchy(root, span => {
+    let hierarchy = d3.hierarchy(root, span => {
         if (span.expanded) {
             return span.children;
         } else {
@@ -229,9 +229,22 @@ function display() {
         }
     });
 
-    var visItems = hierarchy.descendants().filter(d => {
+    let visItems = hierarchy.descendants().filter(d => {
         return d.data.start < maxExtent && d.data.end > minExtent;
     });
+
+    // Compute a new order based on what's visible.
+    let map = {};
+    let index = -1;
+    hierarchy.eachBefore(n => {
+        console.log("computing for " + n.data.name);
+        if (n.data.start < maxExtent && n.data.end > minExtent) {
+            map[n.data.id] = {
+                rowIdx: ++index
+            }
+        }
+    })
+    console.log(map);
 
     console.log("Visible items: " + visItems.length);
     // console.log(d3.event.selection.map(x.invert));
@@ -243,8 +256,13 @@ function display() {
     //update main item rects
     // For already-visible spans, make sure they're sized appropriately.
     let rects = itemRects.selectAll("rect")
-        .data(visItems, (d: any) => { return d.data.id; })
+        .data(visItems, (d: any) => { 
+            console.log("key" + d.data.id);
+            return d.data.id; })
         .attr("x", function (d) { return x1(d.data.start); })
+        .attr("y", function (d) { 
+            console.log("about to check " + d.data.name);
+            return yScale(map[d.data.id].rowIdx) + 10; })
         .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
         .on("click", function(node) { // we should set this up once at the beginning
             console.log("got clicked: " + node.data.name);
@@ -259,10 +277,10 @@ function display() {
         .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) - 100; })
         .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
         .attr("height", function (d) { return .8 * yScale(1); })
-        .style("opacity", 0.5);
+        .style("opacity", 0.7);
     
     newRects.transition()
-        .duration(200)
+        .duration(300)
         .style("opacity", 1)
         .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) + 10; });
 
@@ -271,6 +289,7 @@ function display() {
     // same deal w/ the text
     var labels = itemRects.selectAll("text")
         .data(visItems, (d: any) => { return d.data.id; })
+        .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) + 20; })
         .attr("x", function (d) { return x1(Math.max(d.data.start, minExtent)); });
 
     labels.enter().append("text")
