@@ -4,6 +4,10 @@ class Span {
     constructor(readonly name: string, readonly start: number, readonly end: number, public children: Array<Span>) {
         this.expanded = true;
     }
+
+    public toString = () : string => {
+        return `Span(id: ${this.id}, start: ${this.start}, end: ${this.end})`;
+    }
 }
 
 class Cyclotron {
@@ -21,12 +25,12 @@ class Cyclotron {
 
     private scrubberStart;
     private scrubberEnd;
-    
+
     constructor() {
-        // First some global configuration. 
+        // First some global configuration.
         document.addEventListener(
-            'mousedown', 
-            e => e.preventDefault(), 
+            'mousedown',
+            e => e.preventDefault(),
             false
         );
 
@@ -52,10 +56,10 @@ class Cyclotron {
             ]),
         ]);
         this.rootSpan = root;
-        
+
         const SPAN_HEIGHT = 80;
-        const MINI_SPAN_HEIGHT = 12; 
-        
+        const MINI_SPAN_HEIGHT = 12;
+
         var hierarchy = d3.hierarchy(root, span => {
             if (span.expanded) {
                 return span.children;
@@ -65,20 +69,20 @@ class Cyclotron {
         });
         let count: number = hierarchy.descendants().length;
         console.log(count);
-        
+
         let next_id = 0;
         hierarchy.descendants().forEach((node, idx) => {
             node.data.id = ++next_id;
         });
-        
+
         console.log(hierarchy.descendants());
-        
+
         var timeBegin = 0;
         var timeEnd = 10000;
-        
+
         var windowWidth = window.innerWidth - 10;
         var windowHeight = window.innerHeight - 10;
-        
+
         let leftPadding = 100;
         let mainHeight = windowHeight * 0.8;
         this.layoutMainHeight = mainHeight;
@@ -86,18 +90,12 @@ class Cyclotron {
         this.layoutMainWidth = mainWidth;
         let miniHeight = windowHeight * 0.2;
         this.layoutScrubberHeight = miniHeight;
-        
+
         //scales
         var x = d3.scaleLinear()
             .domain([timeBegin, timeEnd])
             .range([0, mainWidth]);
         this.scaleX = x;
-        var x1 = d3.scaleLinear()
-            .range([0, mainWidth]);
-        var yScale = d3.scaleLinear()
-            .domain([0, count]) // this is with everything unexpanded
-            .range([0, mainHeight]);
-
         this.svgChart = d3.select("body")
             .append("svg")
             .attr("width", windowWidth)
@@ -113,119 +111,16 @@ class Cyclotron {
             .attr("transform", "translate(" + leftPadding + "," + 0 + ")")
             .attr("width", windowWidth)
             .attr("height", mainHeight)
-            .attr("class", "main");
+            .attr("class", "main")
+            .append("g")
+            .attr("clip-path", "url(#clip)");
         this.scrubberPanel = this.svgChart.append("g")
             .attr("transform", "translate(" + leftPadding + "," + mainHeight + ")")
             .attr("width", windowWidth)
             .attr("height", miniHeight)
             .attr("class", "mini");
 
-        var itemRects = this.mainPanel
-            .append("g")
-            .attr("clip-path", "url(#clip)");
-        
-        var minExtent;
-        var maxExtent;
-        
-        function display() {
-            console.log(d3.event);
-        
-            if (d3.event.selection !== undefined) {
-                // move this to only fire on brush moves
-                minExtent = d3.event.selection.map(x.invert)[0];
-                maxExtent = d3.event.selection.map(x.invert)[1];
-            }
-        
-            // console.log(d3.event.selection);
-            // is this bad to be recomputing the hierachy here?
-            let hierarchy = d3.hierarchy(root, span => {
-                if (span.expanded) {
-                    return span.children;
-                } else {
-                    console.log("NOT EXPANDED");
-                    return [];
-                }
-            });
-        
-            let visItems = hierarchy.descendants().filter(d => {
-                return d.data.start < maxExtent && d.data.end > minExtent;
-            });
-        
-            // Compute a new order based on what's visible.
-            let map = {};
-            let index = -1;
-            hierarchy.eachBefore(n => {
-                console.log("computing for " + n.data.name);
-                if (n.data.start < maxExtent && n.data.end > minExtent) {
-                    map[n.data.id] = {
-                        rowIdx: ++index
-                    }
-                }
-            })
-            console.log(map);
-        
-            console.log("Visible items: " + visItems.length);
-            // console.log(d3.event.selection.map(x.invert));
-
-            x1.domain([minExtent, maxExtent]);
-        
-            //update main item rects
-            // For already-visible spans, make sure they're positioned appropriately.
-            //
-            // Note that we animate changes on the y-axis, but not the x.
-            let rects = itemRects.selectAll("rect")
-                .data(visItems, (d: any) => { 
-                    console.log("key" + d.data.id);
-                    return d.data.id; })
-                .attr("x", function (d) { return x1(d.data.start); })
-                .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
-                .on("click", function(node) { // we should set this up once at the beginning
-                    console.log("got clicked: " + node.data.name);
-                    node.data.expanded = !node.data.expanded;
-                    display();
-                })
-                .style("opacity", 1.0);
-
-            rects.transition().duration(300)
-            .attr("y", function (d) { 
-                console.log("about to check " + d.data.name);
-                return yScale(map[d.data.id].rowIdx) + 10; });
-        
-            // For new entries, do the things.
-            let newRects = rects.enter().append("rect")
-                .attr("class", function (d) { return "miniItem" + d.data.name; })
-                .attr("x", function (d) { return x1(d.data.start); })
-                .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) - 100; })
-                .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
-                .attr("height", function (d) { return .8 * yScale(1); })
-                .style("opacity", 0.7);
-            
-            newRects.transition()
-                .duration(300)
-                .style("opacity", 1.0)
-                .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) + 10; });
-        
-            rects.exit().remove();
-        
-            // same deal w/ the text
-            var labels = itemRects.selectAll("text")
-                .data(visItems, (d: any) => { return d.data.id; })
-                .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) + 20; })
-                .attr("x", function (d) { return x1(Math.max(d.data.start, minExtent)); });
-        
-            labels.enter().append("text")
-                .text(function (d) { return d.data.name; })
-                // .attr("class", "span-text") // why doesn't this work? why inline fill???
-                .style("fill", "white")
-                .attr("x", function (d) { return x1(Math.max(d.data.start, minExtent)); })
-                .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) + 20; })
-                .attr("text-anchor", "start");
-        
-            labels.exit().remove();
-        
-        }
-
-        this.drawScrubber(display);
+        this.drawScrubber();
     }
 
     private nodes(expanded_only = false) {
@@ -236,14 +131,96 @@ class Cyclotron {
                 return [];
             }
         });
-        return hierarchy; // filiter out the root?
+        return hierarchy;  // TODO: filter out the root?
     }
 
-    private drawScrubber(display_fn) {
+    private drawMain() {
+        let hierarchy = this.nodes(true);
+
+        let visItems = hierarchy.descendants().filter(d => {
+            return d.data.start < this.scrubberEnd && d.data.end > this.scrubberStart;
+        });
+
+        // Compute a new order based on what's visible.
+        let map = {};
+        let index = -1;
+        hierarchy.eachBefore(n => {
+            if (n.data.start < this.scrubberEnd && n.data.end > this.scrubberStart) {
+                map[n.data.id] = {
+                    rowIdx: ++index
+                }
+            }
+        })
+
+        console.log("Visible items: " + visItems.length);
+        var x1 = d3.scaleLinear().range([0, this.layoutMainWidth]);
+        x1.domain([this.scrubberStart, this.scrubberEnd]);
+
+        // This scales all the spans to share the vertical space when they're fully expanded.
+        //
+        // We might want to use a fixed height here and scroll instead.
+        var yScale = d3.scaleLinear() // do we need this domain?
+            .domain([0, this.nodes().descendants().length])
+            .range([0, this.layoutMainHeight]);
+
+
+        // For already-visible spans, make sure they're positioned appropriately.
+        //
+        // Note that we animate changes on the y-axis, but not the x.
+        let rects = this.mainPanel.selectAll("rect") // formerly itemRects
+            .data(visItems, (d: any) => { return d.data.id; })
+            .attr("x", function (d) { return x1(d.data.start); })
+            .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
+            .on("click", node => { // we should set this up once at the beginning
+                console.log("got clicked: " + node.data.name);
+                node.data.expanded = !node.data.expanded;
+                this.drawMain();
+            })
+            .style("opacity", 1.0);
+
+        rects.transition().duration(300)
+        .attr("y", function (d) {
+            console.log("about to check " + d.data.name);
+            return yScale(map[d.data.id].rowIdx) + 10; });
+
+        // For new entries, do the things.
+        let newRects = rects.enter().append("rect")
+            .attr("class", function (d) { return "miniItem" + d.data.name; })
+            .attr("x", function (d) { return x1(d.data.start); })
+            .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) - 100; })
+            .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
+            .attr("height", function (d) { return .8 * yScale(1); })
+            .style("opacity", 0.7);
+
+        newRects.transition()
+            .duration(300)
+            .style("opacity", 1.0)
+            .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) + 10; });
+
+        rects.exit().remove();
+
+        // same deal w/ the text
+        var labels = this.mainPanel.selectAll("text") // formerly itemRects.selectAll("text")
+            .data(visItems, (d: any) => { return d.data.id; })
+            .attr("y", d => { return yScale(map[d.data.id].rowIdx) + 20; })
+            .attr("x", d => { return x1(Math.max(d.data.start, this.scrubberStart)); });
+
+        labels.enter().append("text")
+            .text(d => { return d.data.name; })
+            // .attr("class", "span-text") // why doesn't this work? why inline fill???
+            .style("fill", "white")
+            .attr("x", d => { return x1(Math.max(d.data.start, this.scrubberStart)); })
+            .attr("y", d => { return yScale(map[d.data.id].rowIdx) + 20; })
+            .attr("text-anchor", "start");
+
+        labels.exit().remove();
+
+    }
+
+    private drawScrubber() {
         // Compute the layout.
         let map = {};
         let index = -1;
-        // console.log(hierarchy.descendants());
         let hierarchy = this.nodes();
         hierarchy.eachBefore(n => {
             map[n.data.id] = {
@@ -251,7 +228,7 @@ class Cyclotron {
             }
         })
         console.log(map);
-        
+
         let count: number = hierarchy.descendants().length;
 
         // In the scrubber we always show everything expanded (for now).
@@ -266,17 +243,20 @@ class Cyclotron {
             .enter().append("rect")
             .attr("class", d => { return "miniItem" + d.data.name; })
             .attr("x", d => { return this.scaleX(d.data.start); })
-            .attr("y", function (n) { 
-                console.log("1querying " + n.data.id);
+            .attr("y", function (n) {
+                // console.log("1querying " + n.data.id);
                 return yScaleMini(map[n.data.id].rowIdx) - 5; })
             .attr("width", d => { return this.scaleX(d.data.end - d.data.start); })
             .attr("height", 10);
-        
+
         var brush = d3.brushX()
             .extent([[0, 0], [this.layoutMainWidth, this.layoutScrubberHeight]])
-            // .x(x)
-            .on("brush", display_fn);
-        
+            .on("brush", () => {
+                this.scrubberStart = d3.event.selection.map(this.scaleX.invert)[0];
+                this.scrubberEnd = d3.event.selection.map(this.scaleX.invert)[1];
+                this.drawMain();
+            });
+
         this.scrubberPanel.append("g")
             .attr("class", "x brush")
             .call(brush)
