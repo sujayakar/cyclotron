@@ -120,13 +120,16 @@ class Cyclotron {
             node.data.expanded = !node.data.expanded;
             this.drawMain();
         };
+
+        let xPosition = d => { return x1(d.data.start); };
+
         // For already-visible spans, make sure they're positioned appropriately.
         //
         // Note that we animate changes on the y-axis, but not on the x-axis. This is so
         // that when you scroll side-to-side, things update immediately.
         let rects = this.mainPanel.selectAll("rect") // formerly itemRects
             .data(visItems, (d: any) => { return d.data.id; })
-            .attr("x", function (d) { return x1(d.data.start); })
+            .attr("x", xPosition)
             .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
             .on("click", clickHandler)
             .style("opacity", 1.0);
@@ -144,7 +147,7 @@ class Cyclotron {
         // For new entries, do the things.
         let newRects = rects.enter().append("rect")
             .attr("class", function (d) { return "span"; })
-            .attr("x", function (d) { return x1(d.data.start); })
+            .attr("x", xPosition)
             .attr("y", function (d) { return yScale(map[d.data.id].rowIdx); })
             .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
             .attr("height", function (d) { return .8 * yScale(1); })
@@ -154,7 +157,7 @@ class Cyclotron {
             .style("opacity", 0.7);
 
         newRects.transition()
-            .duration(250)
+            .duration(150)
             .style("opacity", 1.0)
             .attr("y", function (d) { return yScale(map[d.data.id].rowIdx); });
 
@@ -163,14 +166,13 @@ class Cyclotron {
         // same deal w/ the text
         var labels = this.mainPanel.selectAll("text") // formerly itemRects.selectAll("text")
             .data(visItems, (d: any) => { return d.data.id; })
-            .attr("y", d => { return yScale(map[d.data.id].rowIdx) + 20; })
-            .attr("x", d => { return x1(Math.max(d.data.start, this.scrubberStart)); });
+            .attr("x", d => { return x1(Math.max(d.data.start, this.scrubberStart)); })
+            .attr("y", d => { return yScale(map[d.data.id].rowIdx) + 20; });
 
         labels.enter().append("text")
             .text(d => { return d.data.name; })
-            // .attr("class", "span-text") // why doesn't this work? why inline fill???
-            .style("fill", "white")
-            .attr("x", d => { return x1(Math.max(d.data.start, this.scrubberStart)); })
+            .attr("class", "span-text") // why doesn't this work? why inline fill???
+            .attr("x", xPosition)
             .attr("y", d => { return yScale(map[d.data.id].rowIdx) + 20; })
             .attr("text-anchor", "start");
 
