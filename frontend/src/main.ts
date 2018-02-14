@@ -191,6 +191,8 @@ class Cyclotron {
             .attr("y", function (d) { return yScale(map[d.data.id].rowIdx); })
             .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
             .attr("height", function (d) { return .8 * yScale(1); })
+            .attr("rx", 10)
+            .attr("ry", 10)
             .on("click", clickHandler)
             .style("opacity", 0.7);
 
