@@ -170,21 +170,26 @@ class Cyclotron {
             x1.domain([minExtent, maxExtent]);
         
             //update main item rects
-            // For already-visible spans, make sure they're sized appropriately.
+            // For already-visible spans, make sure they're positioned appropriately.
+            //
+            // Note that we animate changes on the y-axis, but not the x.
             let rects = itemRects.selectAll("rect")
                 .data(visItems, (d: any) => { 
                     console.log("key" + d.data.id);
                     return d.data.id; })
                 .attr("x", function (d) { return x1(d.data.start); })
-                .attr("y", function (d) { 
-                    console.log("about to check " + d.data.name);
-                    return yScale(map[d.data.id].rowIdx) + 10; })
                 .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
                 .on("click", function(node) { // we should set this up once at the beginning
                     console.log("got clicked: " + node.data.name);
                     node.data.expanded = !node.data.expanded;
                     display();
-                });
+                })
+                .style("opacity", 1.0);
+
+            rects.transition().duration(300)
+            .attr("y", function (d) { 
+                console.log("about to check " + d.data.name);
+                return yScale(map[d.data.id].rowIdx) + 10; });
         
             // For new entries, do the things.
             let newRects = rects.enter().append("rect")
@@ -197,7 +202,7 @@ class Cyclotron {
             
             newRects.transition()
                 .duration(300)
-                .style("opacity", 1)
+                .style("opacity", 1.0)
                 .attr("y", function (d) { return yScale(map[d.data.id].rowIdx) + 10; });
         
             rects.exit().remove();
