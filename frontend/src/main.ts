@@ -1,17 +1,5 @@
-class Span {
-    public expanded: boolean;
-    public id: number;
-    constructor(readonly name: string, readonly start: number, readonly end: number, public children: Array<Span>) {
-        this.expanded = true;
-    }
-
-    public toString = () : string => {
-        return `Span(id: ${this.id}, start: ${this.start}, end: ${this.end})`;
-    }
-}
-
 class Cyclotron {
-    private rootSpan: Span;
+    private rootSpan;
 
     private svgChart;
     private mainPanel;
@@ -34,27 +22,10 @@ class Cyclotron {
             false
         );
 
-        // For now we use filler data.
-        var root = new Span("root-don't show", 0, 10000, [
-            new Span("Scheduler", 0, 10000, [
-                new Span("PreLocal", 265, 420, [
-                    new Span("Hash", 300, 405, []),
-                ]),
-                new Span("RemoteAdd(/foo)", 580, 615, []),
-                new Span("RemoteAdd(/bar)", 620, 900, []),
-                new Span("RemoteAdd(/baz)", 960, 1265, []),
-                new Span("RemoteAdd(/bang)", 1270, 1360, []),
-            ]),
-            new Span("Downloader", 0, 10000, [
-                new Span("DownloadBlock", 300, 530, []),
-                new Span("DownloadBlock", 550, 700, []),
-                new Span("DownloadBlock", 710, 790, []),
-                new Span("DownloadBlock", 800, 1180, []),
-                new Span("DownloadBlock", 1270, 1365, []),
-                new Span("DownloadBlock", 1370, 1640, []),
-                new Span("DownloadBlock", 1645, 1910, []),
-            ]),
-        ]);
+        let manager = new SpanManager();
+        test_events(manager);
+
+        let root = manager.getThread("Control");
         this.rootSpan = root;
 
         const SPAN_HEIGHT = 80;
@@ -69,12 +40,6 @@ class Cyclotron {
         });
         let count: number = hierarchy.descendants().length;
         console.log(count);
-
-        let next_id = 0;
-        hierarchy.descendants().forEach((node, idx) => {
-            node.data.id = ++next_id;
-        });
-
         console.log(hierarchy.descendants());
 
         var timeBegin = 0;
@@ -275,3 +240,39 @@ class Cyclotron {
 }
 
 new Cyclotron();
+
+function test_events(manager) {
+    let events = [
+        {ThreadStart: {name: "Control", id: 0, ts: 0}},
+        {AsyncStart: {name: "Scheduler", parent_id: 0, id: 1, ts: 0}},
+        {AsyncStart: {name: "Downloader", parent_id: 0, id: 2, ts: 0}},
+        {AsyncStart: {name: "PreLocal", parent_id: 0, id: 3, ts: 265}},
+        {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 4, ts: 300}},
+        {AsyncEnd: {id: 3, ts: 420, outcome: "Success"}},
+        {AsyncEnd: {id: 4, ts: 530, outcome: "Success"}},
+        {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 5, ts: 550}},
+        {AsyncStart: {name: "RemoteAdd(/foo)", parent_id: 1, id: 6, ts: 580}},
+        {AsyncEnd: {id: 6, ts: 615, outcome: "Success"}},
+        {AsyncStart: {name: "RemoteAdd(/bar)", parent_id: 1, id: 7, ts: 620}},
+        {AsyncEnd: {id: 5, ts: 700, outcome: "Success"}},
+        {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 8, ts: 710}},
+        {AsyncEnd: {id: 8, ts: 790, outcome: "Success"}},
+        {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 9, ts: 800}},
+        {AsyncEnd: {id: 7, ts: 900, outcome: "Success"}},
+        {AsyncStart: {name: "RemoteAdd(/baz)", parent_id: 1, id: 10, ts: 960}},
+        {AsyncEnd: {id: 9, ts: 1180, outcome: "Success"}},
+        {AsyncEnd: {id: 10, ts: 1265, outcome: "Success"}},
+        {AsyncStart: {name: "RemoteAdd(/bang)", parent_id: 1, id: 11, ts: 1270}},
+        {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 12, ts: 1270}},
+        {AsyncEnd: {id: 11, ts: 1360, outcome: "Success"}},
+        {AsyncEnd: {id: 12, ts: 1365, outcome: "Success"}},
+        {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 13, ts: 1370}},
+        {AsyncEnd: {id: 13, ts: 1640, outcome: "Success"}},
+        {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 14, ts: 1645}},
+        {AsyncEnd: {id: 14, ts: 1365, outcome: "Success"}},
+        {AsyncEnd: {id: 1, ts: 10000, outcome: "Success"}},
+        {AsyncEnd: {id: 2, ts: 10000, outcome: "Success"}},
+        {ThreadEnd: {id: 0, ts: 10000}},
+    ];
+    events.forEach(function (e) {manager.addEvent(e)});
+}

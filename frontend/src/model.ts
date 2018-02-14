@@ -1,9 +1,7 @@
 class OnCPU {
-    public start;
     public end;
 
-    constructor(start) {
-        this.start = start;
+    constructor(readonly start: number) {
         this.end = null;
     }
 
@@ -19,34 +17,28 @@ class OnCPU {
     }
 }
 
-class LoggedSpan {
-    public name;
-    public id;
-    public parent_id;
-    public start;
+class Span {
     public end;
-
     public scheduled;
-
-    public metadata;
     public outcome;
 
     // Derived from `parent_id` pointers.
-    private children;
+    public children;
+    public expanded;
 
-    constructor(name, id, parent_id, start, metadata) {
-        this.name = name;
-        this.id = id;
-        this.parent_id = parent_id;
-        this.start = start;
+    constructor(
+        readonly name: string,
+        readonly id: number,
+        readonly parent_id: number,
+        readonly start: number,
+        readonly metadata,
+    ) {
         this.end = null;
-
         this.scheduled = [];
-
-        this.metadata = metadata;
         this.outcome = null;
 
         this.children = [];
+        this.expanded = true;
     }
 
     public isOpen() {
@@ -90,16 +82,24 @@ class LoggedSpan {
         let last = this.scheduled[this.scheduled.length - 1];
         last.close(ts);
     }
+
+    public toString = () : string => {
+        return `Span(id: ${this.id}, start: ${this.start}, end: ${this.end})`;
+    }
 }
 
 
 class SpanManager {
-    private spans;
-    private threads;
+    public spans;
+    public threads;
 
     constructor() {
         this.spans = {};
         this.threads = {};
+    }
+
+    public getThread(name) {
+        return this.spans[this.threads[name]];
     }
 
     private getSpan(id) {
@@ -119,7 +119,7 @@ class SpanManager {
 
     private spanStart(start) {
         let parent = this.getSpan(start.parent_id);
-        let span = new LoggedSpan(
+        let span = new Span(
             start.name,
             start.id,
             start.parent_id,
@@ -168,7 +168,7 @@ class SpanManager {
             if (this.threads[start.name]) {
                 throw new Error("Duplicate thread name " + start.name);
             }
-            let span = new LoggedSpan(
+            let span = new Span(
                 start.name,
                 start.id,
                 null, // No parent on threads
@@ -189,6 +189,9 @@ class SpanManager {
 }
 
 function convertTs(ts) {
+    if (typeof ts === "number") {
+        return ts;
+    }
     return ts.secs + ts.nanos * 1e-9;
 }
 
