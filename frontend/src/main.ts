@@ -1,5 +1,6 @@
 class Cyclotron {
     private svgChart;
+    private topAxis;
     private mainPanel;
     private scrubberPanel;
     private spanManager;
@@ -65,12 +66,19 @@ class Cyclotron {
             .append("rect")
             .attr("width", windowWidth)
             .attr("height", mainHeight);
-        this.mainPanel = this.svgChart.append("g")
+
+        let axisHeight = 20;
+        this.topAxis = this.svgChart.append("g")
             .attr("transform", "translate(" + leftPadding + "," + 0 + ")")
             .attr("width", windowWidth)
             .attr("height", mainHeight)
+            .attr("class", "top-axis")
+            .append("g");
+        this.mainPanel = this.svgChart.append("g")
+            .attr("transform", "translate(" + leftPadding + "," + axisHeight + ")")
+            .attr("width", windowWidth)
+            .attr("height", mainHeight)
             .attr("class", "main")
-            .append("g")
             .attr("clip-path", "url(#clip)");
         this.scrubberPanel = this.svgChart.append("g")
             .attr("transform", "translate(" + leftPadding + "," + mainHeight + ")")
@@ -87,6 +95,12 @@ class Cyclotron {
     }
 
     private drawMain() {
+        // Update the axis at the top.
+        let axisScale = d3.scaleLinear()
+            .domain([this.scrubberStart, this.scrubberEnd])
+            .range([0, this.layoutMainWidth]);
+        this.topAxis.call(d3.axisBottom(axisScale));
+
         let hierarchy = this.nodes(true);
 
         let visItems = hierarchy.descendants().filter(d => {
