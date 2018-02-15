@@ -25,16 +25,6 @@ class Cyclotron {
 
         this.spanManager = new SpanManager();
 
-        test_events().forEach((e, i) => {
-            setTimeout(() => {
-                if (i > 20) {
-                    console.log("Skipping", e);
-                    return;
-                }
-                this.addEvent(e);
-            }, i * 100);
-        })
-
         const SPAN_HEIGHT = 80;
         const MINI_SPAN_HEIGHT = 12;
 
@@ -87,6 +77,14 @@ class Cyclotron {
 
         // TODO: Print that we're waiting for data or something here.
         this.setupScrubber();
+
+        var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
+        socket.onmessage = event => { this.addEvent(JSON.parse(event.data)); };
+        socket.onopen = event => { socket.send("test.log"); };
+        socket.onerror = event => { alert(`Socket error ${event}`); };
+        socket.onclose = event => { alert(`Socket closed ${event}`); };
+
+        // test_events().forEach((e, i) => { setTimeout(() => { this.addEvent(e); }, i * 100); })
     }
 
     public addEvent(event) {
@@ -163,7 +161,6 @@ class Cyclotron {
         let rects = this.mainPanel.selectAll("rect") // formerly itemRects
             .data(visItems, (d: any) => { return d.data.id; })
             .attr("x", xPosition)
-            .attr("y", yPosition)
             .attr("width", computeWidth)
             .attr("height", computeHeight)
             .on("click", clickHandler)
@@ -177,7 +174,7 @@ class Cyclotron {
             .duration(100)
             .ease(d3.easeLinear)
             .style("opacity", 1.0)
-            .attr("y", d => { return yScale(map[d.data.id].rowIdx); });
+            .attr("y", yPosition);
 
         // For new entries, do the things.
         let newRects = rects.enter().append("rect")

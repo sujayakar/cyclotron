@@ -13,7 +13,7 @@ class OnCPU {
         if (!this.isOpen()) {
             throw new Error("Double close on trace");
         }
-        if (this.start > this.end) {
+        if (this.start > ts) {
             throw new Error("Trace wth start after end");
         }
         this.end = ts;
