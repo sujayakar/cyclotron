@@ -107,6 +107,42 @@ class Cyclotron {
             .attr("width", windowWidth)
             .attr("height", mainHeight);
 
+        // Create the scrubber on the main panel, too.
+        //
+        // This comes before the other rects which means it appears "behind" when rendering,
+        // so we should probably bump it to the top once it starts?
+        let mainScrubber = d3.brushX()
+            .extent([[0, 0], [this.layoutMainWidth, this.layoutMainHeight]])
+            .on("end", () => {
+                if (!d3.event.selection) {
+                    // This is fired after we clear below (i.e. recursively), so we should just return.
+                    return;
+                }
+
+                if (d3.event.selection[1] - d3.event.selection[0] < 5) {
+                    console.log("skipping");
+                    // Hide the scrubber.
+                    mainScrubber.move(d3.select("#main-brush"), null);
+                    return;
+                }
+
+                // Scale based on the current viewport.
+                let scale = d3.scaleLinear()
+                    .domain([0, this.layoutMainWidth])
+                    .range([this.scrubberStart, this.scrubberEnd]);
+                this.scrubberStart = scale(d3.event.selection[0]);
+                this.scrubberEnd = scale(d3.event.selection[1]);
+                this.drawMain();
+
+                // Hide the scrubber.
+                mainScrubber.move(d3.select("#main-brush"), null);
+            });
+        this.svgChart.append("g")
+            .attr("transform", "translate(" + leftPadding + ",0)")
+            .attr("id", "main-brush")
+            .attr("class", "brush")
+            .call(mainScrubber);
+
         let axisHeight = 20;
         this.topAxis = this.svgChart.append("g")
             .attr("transform", "translate(" + leftPadding + "," + 0 + ")")
@@ -135,35 +171,9 @@ class Cyclotron {
                 this.drawMain(false); // drawMain redraws the scrubber, but we don't want to do that if we're...from the scrubber
             });
         this.scrubberPanel.append("g")
-            .attr("class", "x brush")
+            .attr("id", "bottom-scrubber")
+            .attr("class", "brush")
             .call(this.scrubberBrush);
-
-        // Create the scrubber on the main panel, too.
-        let mainScrubber = d3.brushX()
-            .extent([[0, 0], [this.layoutMainWidth, this.layoutMainHeight]])
-            .on("end", () => {
-                if (!d3.event.selection) {
-                    // This is fired after we clear below (i.e. recursively), so we should just return.
-                    return;
-                }
-
-                // Scale based on the current viewport.
-                let scale = d3.scaleLinear()
-                    .domain([0, this.layoutMainWidth])
-                    .range([this.scrubberStart, this.scrubberEnd]);
-                this.scrubberStart = scale(d3.event.selection[0]);
-                this.scrubberEnd = scale(d3.event.selection[1]);
-                this.drawMain();
-
-                // Hide the scrubber.
-                mainScrubber.move(d3.select("#main-brush"), null);
-            });
-
-        this.svgChart.append("g")
-            .attr("transform", "translate(" + leftPadding + ",0)")
-            .attr("id", "main-brush")
-            .attr("class", "x brush")
-            .call(mainScrubber);
 
         // TODO: Print that we're waiting for data or something here.
         var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
@@ -423,7 +433,7 @@ class Cyclotron {
     private drawScrubber() {
         // Make sure the scrubber's position is reflected.
         if (this.scrubberStart && this.scrubberEnd)
-            d3.select(".brush").call(this.scrubberBrush.move, [this.scrubberStart, this.scrubberEnd]);
+            d3.select("#bottom-scrubber").call(this.scrubberBrush.move, [this.scrubberStart, this.scrubberEnd]);
 
         this.scaleX.domain([0, this.spanManager.maxTime]);
 
