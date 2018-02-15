@@ -148,8 +148,8 @@ impl CyclotronServer {
                 break buf;
             } else {
                 buf.pop();
-                let event: TraceEvent = serde_json::from_str(&buf)?;
-                println!("Read {:?}", event);
+                // let event: TraceEvent = serde_json::from_str(&buf)?;
+                // println!("Read {:?}", event);
                 client.send_message(&Message::text(buf.as_str()))?;
             }
         };
@@ -164,8 +164,8 @@ impl CyclotronServer {
             }
 
             fragment.pop();
-            let event: TraceEvent = serde_json::from_str(&fragment)?;
-            println!("Read {:?}", event);
+            // let event: TraceEvent = serde_json::from_str(&fragment)?;
+            // println!("Read {:?}", event);
             client.send_message(&Message::text(fragment.as_str()))?;
 
             fragment.clear();

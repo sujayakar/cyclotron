@@ -80,13 +80,13 @@ class Cyclotron {
 
         var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
         socket.onmessage = event => { this.addEvent(JSON.parse(event.data)); };
-        socket.onopen = event => { socket.send("empty_file.log"); };
+        socket.onopen = event => { socket.send("empty_file_release.log"); };
         socket.onerror = event => { alert(`Socket error ${event}`); };
         socket.onclose = event => { alert(`Socket closed ${event}`); };
 
         this.drawMain();
 
-        // test_events().forEach((e, i) => { setTimeout(() => { this.addEvent(e); }, i * 100); })
+        // test_events().forEach((e, i) => { setTimeout(() => { this.addEvent(e); }, 0); });
     }
 
     public addEvent(event) {
@@ -143,28 +143,35 @@ class Cyclotron {
         // Compute a new order based on what's visible.
         let map = {};
         let index = -1;
+        let prev = null;
         hierarchy.eachBefore(n => {
-            if (n.data.intersects(this.scrubberStartTs(), this.scrubberEndTs())) {
-                map[n.data.id] = {
-                    rowIdx: ++index
+            let span = n.data;
+            if (span.intersects(this.scrubberStartTs(), this.scrubberEndTs())) {
+                if (prev && prev.mergeable(span)) {
+                    map[n.data.id] = { rowIdx: index };
+                } else {
+                    map[n.data.id] = { rowIdx: ++index };
                 }
+                prev = n.data;
             }
         })
 
-        console.log("Visible items: " + visItems.length);
         var x1 = d3.scaleLinear().range([0, this.layoutMainWidth]);
         x1.domain([this.scrubberStartTs(), this.scrubberEndTs()]);
 
         // This scales all the spans to share the vertical space when they're fully expanded.
         //
         // We might want to use a fixed height here and scroll instead.
+        if (index < 0) {
+            index = 0;
+        }
         let viewHeight = this.layoutMainHeight - 60;
-        let defaultHeight = 40 * visItems.length;
+        let defaultHeight = 40 * index;
         if (defaultHeight < viewHeight) {
             viewHeight = defaultHeight;
         }
         var yScale = d3.scaleLinear()
-            .domain([0, visItems.length])
+            .domain([0, index])
             .range([0, viewHeight]);
 
         let clickHandler = node => { // we should set this up once at the beginning
@@ -201,16 +208,19 @@ class Cyclotron {
             .attr("y", yPosition);
 
         // For new entries, do the things.
+        let color = d3.scaleLinear<string>()
+            .domain([0, 0.01, this.spanManager.maxTime])
+            .clamp(true)
+            .range(["#4caf50", "#e88b01", "#af4c4c"]);
         let newRects = rects.enter().append("rect")
             .attr("class", d => { return "span"; })
             .attr("x", xPosition)
             .attr("y", yPosition)
             .attr("width", computeWidth)
             .attr("height", computeHeight)
-            .attr("rx", 10)
-            .attr("ry", 10)
             .on("click", clickHandler)
-            .style("opacity", 0.7);
+            .style("opacity", 0.7)
+            .style("fill", d => { return color(this.spanEnd(d.data) - d.data.start);});
 
         newRects.transition()
             .duration(150)
@@ -233,6 +243,37 @@ class Cyclotron {
             .attr("text-anchor", "start");
 
         labels.exit().remove();
+
+        // Okay, now draw the arrows
+        let toDraw = this.spanManager.wakeups.filter(w => {
+            if (!map[w.waking_id] || !map[w.parked_id]) {
+                return false;
+            }
+            if (w.ts < scrubberDomain[0] || w.ts > scrubberDomain[1]) {
+                return false;
+            }
+            return true;
+        });
+        console.log(`Found ${toDraw.length} arrows`);
+        let wakeups = this.mainPanel.selectAll("line")
+            .data(toDraw, (d) => { return d.id })
+            .attr("x1", (d) => { return x1(d.ts) })
+            .attr("y1", (d) => { return yScale(map[d.waking_id].rowIdx) })
+            .attr("x2", (d) => { return x1(d.ts) + 5 })
+            .attr("y2", (d) => { return yScale(map[d.waking_id].rowIdx) + 5 })
+            .style("stroke", "rgb(255,0,0)")
+            .style("stroke-width", "2");
+
+        wakeups.enter().append("line")
+            .data(toDraw, (d) => { return d.id })
+            .attr("x1", (d) => { return x1(d.ts) })
+            .attr("y1", (d) => { return yScale(map[d.waking_id].rowIdx) })
+            .attr("x2", (d) => { return x1(d.ts) + 5 })
+            .attr("y2", (d) => { return yScale(map[d.parked_id].rowIdx) })
+            .style("stroke", "rgb(255,0,0)")
+            .style("stroke-width", "1");
+
+        wakeups.exit().remove();
     }
 
     private setupScrubber() {

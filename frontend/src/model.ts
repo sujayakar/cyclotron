@@ -35,13 +35,14 @@ class Span {
         readonly parent_id: number,
         readonly start: number,
         readonly metadata,
+        readonly threadName
     ) {
         this.end = null;
         this.scheduled = [];
         this.outcome = null;
 
         this.children = [];
-        this.expanded = true;
+        this.expanded = false;
     }
 
     public getChildren(forceExpanded) {
@@ -54,6 +55,16 @@ class Span {
 
     public isOpen() {
         return this.end === null;
+    }
+
+    public mergeable(span) {
+        if (this.isOpen()) {
+            return false;
+        }
+        if (span instanceof Root) {
+            return false;
+        }
+        return this.parent_id === span.parent_id && this.end < span.start;
     }
 
     public intersects(start, end) {
@@ -101,7 +112,7 @@ class Span {
     }
 
     public toString = () : string => {
-        return `Span(id: ${this.id}, start: ${this.start}, end: ${this.end})`;
+        return `Span(id: ${this.id}, name: ${this.name}, start: ${this.start}, end: ${this.end})`;
     }
 }
 
@@ -120,14 +131,27 @@ class Root {
         return false;
     }
 
+    public mergeable(span) {
+        return false;
+    }
+
     public isOpen() {
+        return true;
+    }
+
+    public isRoot() {
         return true;
     }
 
     public getChildren(force) {
         return Object.keys(this.manager.threads)
+            .sort()
             .map(k => this.manager.spans[this.manager.threads[k]]);
     }
+}
+
+class Wakeup {
+    constructor(public id, public waking_id, public parked_id, public ts) {}
 }
 
 
@@ -135,10 +159,12 @@ class SpanManager {
     public spans;
     public threads;
     public maxTime;
+    public wakeups;
 
     constructor() {
         this.spans = {};
         this.threads = {};
+        this.wakeups = [];
         this.maxTime = 0;
     }
 
@@ -179,6 +205,7 @@ class SpanManager {
             start.parent_id,
             this.convertTs(start.ts),
             start.metadata,
+            parent.threadName,
         );
 
         if (parent.children.length > 0) {
@@ -228,15 +255,21 @@ class SpanManager {
                 null, // No parent on threads
                 this.convertTs(start.ts),
                 null, // No metadata on threads
+                start.name,
             );
-            span.expanded = true;
             this.addSpan(span);
             this.threads[start.name] = start.id;
         } else if (event.ThreadEnd) {
             let span = this.getSpan(event.ThreadEnd.id);
             span.close(this.convertTs(event.ThreadEnd.ts));
         } else if (event.Wakeup) {
-            //console.log(event);
+            let wakeup = new Wakeup(
+                this.wakeups.length,
+                event.Wakeup.parked_span,
+                event.Wakeup.waking_span,
+                this.convertTs(event.Wakeup.ts),
+            );
+            this.wakeups.push(wakeup);
         } else {
             throw new Error("Unexpected event: " + event);
         }
