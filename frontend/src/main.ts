@@ -63,7 +63,6 @@ class Cyclotron {
                 } else if (d3.event.keyCode == 68) { // D
                     panRight();
                 }
-                d3.select(".brush").call(this.scrubberBrush.move, [this.scrubberStart, this.scrubberEnd]);
             })
             .on("wheel.zoom", () => {
                 if (!this.scrubberStart) return;
@@ -72,7 +71,6 @@ class Cyclotron {
                 } else if (d3.event.wheelDeltaY < 0) {
                     zoomOut();
                 }
-                d3.select(".brush").call(this.scrubberBrush.move, [this.scrubberStart, this.scrubberEnd]);
             });
 
         this.spanManager = new SpanManager();
@@ -128,21 +126,44 @@ class Cyclotron {
             .attr("height", miniHeight)
             .attr("class", "mini");
 
-
         this.scrubberBrush = d3.brushX()
             .extent([[0, 0], [this.layoutMainWidth, this.layoutScrubberHeight]])
             .on("brush", () => {
                 console.log("BRUSHED");
                 this.scrubberStart = d3.event.selection[0];
                 this.scrubberEnd = d3.event.selection[1];
-                this.drawMain();
+                this.drawMain(false); // drawMain redraws the scrubber, but we don't want to do that if we're...from the scrubber
             });
         this.scrubberPanel.append("g")
             .attr("class", "x brush")
-            .call(this.scrubberBrush)
-            .selectAll("rect")
-            .attr("y", 0)
-            .attr("height", this.layoutScrubberHeight);
+            .call(this.scrubberBrush);
+
+        // Create the scrubber on the main panel, too.
+        let mainScrubber = d3.brushX()
+            .extent([[0, 0], [this.layoutMainWidth, this.layoutMainHeight]])
+            .on("end", () => {
+                if (!d3.event.selection) {
+                    // This is fired after we clear below (i.e. recursively), so we should just return.
+                    return;
+                }
+
+                // Scale based on the current viewport.
+                let scale = d3.scaleLinear()
+                    .domain([0, this.layoutMainWidth])
+                    .range([this.scrubberStart, this.scrubberEnd]);
+                this.scrubberStart = scale(d3.event.selection[0]);
+                this.scrubberEnd = scale(d3.event.selection[1]);
+                this.drawMain();
+
+                // Hide the scrubber.
+                mainScrubber.move(d3.select("#main-brush"), null);
+            });
+
+        this.svgChart.append("g")
+            .attr("transform", "translate(" + leftPadding + ",0)")
+            .attr("id", "main-brush")
+            .attr("class", "x brush")
+            .call(mainScrubber);
 
         // TODO: Print that we're waiting for data or something here.
         var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
@@ -186,9 +207,10 @@ class Cyclotron {
         return this.scaleX.invert(this.scrubberEnd);
     }
 
-    private drawMain() {
+    private drawMain(redrawScrubber = true) {
         this.scaleX.domain([0, this.spanManager.maxTime]);
-        this.drawScrubber();
+        if (redrawScrubber)
+            this.drawScrubber();
 
         // Update the axis at the top.
         let scrubberDomain = [this.scrubberStartTs(), this.scrubberEndTs()];
@@ -399,6 +421,10 @@ class Cyclotron {
     // }
 
     private drawScrubber() {
+        // Make sure the scrubber's position is reflected.
+        if (this.scrubberStart && this.scrubberEnd)
+            d3.select(".brush").call(this.scrubberBrush.move, [this.scrubberStart, this.scrubberEnd]);
+
         this.scaleX.domain([0, this.spanManager.maxTime]);
 
         // Compute the layout.
