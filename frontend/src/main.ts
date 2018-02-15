@@ -232,7 +232,7 @@ class Cyclotron {
         //
         // We might want to use a fixed height here and scroll instead.
         let viewHeight = this.layoutMainHeight - 60;
-        let defaultHeight = 40 * index;
+        let defaultHeight = 30 * index;
         if (defaultHeight < viewHeight) {
             viewHeight = defaultHeight;
         }
@@ -246,69 +246,88 @@ class Cyclotron {
             this.queueRedraw();
         };
 
-        let xPosition = d => { return x1(d.data.start); };
+        let xPosition = d => {
+            let start = x1(d.data.start);
+            if (start < 0) {
+                start = 0;
+            }
+            return start;
+        };
         let yPosition = d => { return yScale(heightMap[d.data.id]); };
-        let computeWidth = d => { return x1(this.spanEnd(d.data)) - x1(d.data.start); };
+        let computeWidth = d => {
+            let start = x1(d.data.start);
+            if (start < 0) {
+                start = 0;
+            }
+            let end = x1(this.spanEnd(d.data));
+            if (end > this.layoutMainWidth) {
+                end = this.layoutMainWidth;
+            }
+            return end - start;
+        };
         let computeHeight = d => { return .95 * yScale(1); };
 
         // For already-visible spans, make sure they're positioned appropriately.
         //
         // Note that we animate changes on the y-axis, but not on the x-axis. This is so
         // that when you scroll side-to-side, things update immediately.
-        let rects = this.mainPanel.selectAll("rect") // formerly itemRects
+        let svgs = this.mainPanel.selectAll("svg") // formerly itemRects
             .data(visItems, (d: any) => { return d.data.id; })
             .attr("x", xPosition)
             .attr("width", computeWidth)
-            .attr("height", computeHeight)
-            .on("click", clickHandler)
-            .style("opacity", 1.0);
+            .attr("height", computeHeight);
 
         // If things shift vertically, we animate them to their new positions.
         //
         // Note that this cancels the previous transition from when the object was newly created,
         // so it should match exactly.
-        rects.transition()
+        svgs.transition()
             .duration(100)
             .ease(d3.easeLinear)
-            .style("opacity", 1.0)
             .attr("y", yPosition);
+
+        let rects = svgs.select("rect")
+            .attr("width", computeWidth)
+            .attr("height", computeHeight)
+            .on("click", clickHandler)
+            .style("opacity", 1.0);
 
         // For new entries, do the things.
         let color = d3.scaleLinear<string>()
             .domain([0, 0.01, this.spanManager.maxTime])
             .clamp(true)
             .range(["#4caf50", "#e88b01", "#af4c4c"]);
-        let newRects = rects.enter().append("rect")
+
+        let newSVGs = svgs.enter().append("svg")
             .attr("class", d => { return "span"; })
             .attr("x", xPosition)
             .attr("y", yPosition)
             .attr("width", computeWidth)
+            .attr("height", computeHeight);
+
+        newSVGs.transition()
+            .duration(150)
+            .attr("y", yPosition);
+
+        let newRects = newSVGs.append("rect")
+            .attr("width", computeWidth)
             .attr("height", computeHeight)
             .on("click", clickHandler)
             .style("opacity", 0.7)
-            .style("fill", d => { return color(this.spanEnd(d.data) - d.data.start);});
+            .style("fill", d => { return color(this.spanEnd(d.data) - d.data.start);})
+
+        let newText = newSVGs.append("text")
+            .text(d => { return d.data.name; })
+            .attr("x", 5)
+            .attr("y", 15)
+            .attr("class", "span-text")
+            .attr("text-anchor", "start");
 
         newRects.transition()
             .duration(150)
-            .style("opacity", 1.0)
-            .attr("y", yPosition);
+            .style("opacity", 1.0);
 
-        rects.exit().remove();
-
-        // same deal w/ the text
-        var labels = this.mainPanel.selectAll("text") // formerly itemRects.selectAll("text")
-            .data(visItems, (d: any) => { return d.data.id; })
-            .attr("x", d => { return x1(Math.max(d.data.start, this.scrubberStartTs())); })
-            .attr("y", d => { return yScale(heightMap[d.data.id]) + 20; });
-
-        labels.enter().append("text")
-            .text(d => { return d.data.name; })
-            .attr("class", "span-text") // why doesn't this work? why inline fill???
-            .attr("x", xPosition)
-            .attr("y", d => { return yScale(heightMap[d.data.id]) + 20; })
-            .attr("text-anchor", "start");
-
-        labels.exit().remove();
+        svgs.exit().remove();
     }
 
     private spanEnd(span) {
