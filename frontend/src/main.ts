@@ -15,6 +15,8 @@ class Cyclotron {
     private scrubberStart;
     private scrubberEnd;
 
+    private queuedRedraw;
+
     constructor() {
         // First some global configuration.
         document.addEventListener(
@@ -39,6 +41,7 @@ class Cyclotron {
         let miniHeight = windowHeight * 0.2;
         this.layoutScrubberHeight = miniHeight;
         let timeHeight = windowHeight * 0.05;
+        this.queuedRedraw = false;
 
         //scales
         this.scaleX = d3.scaleLinear()
@@ -84,14 +87,26 @@ class Cyclotron {
         socket.onerror = event => { alert(`Socket error ${event}`); };
         socket.onclose = event => { alert(`Socket closed ${event}`); };
 
-        this.drawMain();
+        this.scrubberStart = 0;
+        this.scrubberEnd = 0;
+        this.queueRedraw();
 
         // test_events().forEach((e, i) => { setTimeout(() => { this.addEvent(e); }, 0); });
     }
 
+    public queueRedraw() {
+        if (!this.queuedRedraw) {
+            this.queuedRedraw = true;
+            setTimeout(() => {
+                this.queuedRedraw = false;
+                this.drawMain();
+            }, 16);
+        }
+    }
+
     public addEvent(event) {
         this.spanManager.addEvent(event);
-        this.drawMain();
+        this.queueRedraw();
     }
 
     private nodes(expanded_only = false) {
@@ -177,7 +192,7 @@ class Cyclotron {
         let clickHandler = node => { // we should set this up once at the beginning
             console.log("got clicked: " + node.data.name);
             node.data.expanded = !node.data.expanded;
-            this.drawMain();
+            this.queueRedraw();
         };
 
         let xPosition = d => { return x1(d.data.start); };
