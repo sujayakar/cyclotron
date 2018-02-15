@@ -14,7 +14,6 @@ class Cyclotron {
 
     private scrubberStart;
     private scrubberEnd;
-    private maxTime;
 
     constructor() {
         // First some global configuration.
@@ -25,18 +24,19 @@ class Cyclotron {
         );
 
         this.spanManager = new SpanManager();
-        test_events(this.spanManager);
+
+        test_events().forEach((e, i) => {
+            setTimeout(() => {
+                if (i > 20) {
+                    console.log("Skipping", e);
+                    return;
+                }
+                this.addEvent(e);
+            }, i * 100);
+        })
 
         const SPAN_HEIGHT = 80;
         const MINI_SPAN_HEIGHT = 12;
-
-        var hierarchy = this.nodes();
-        let count: number = hierarchy.descendants().length;
-        console.log(count);
-        console.log(hierarchy.descendants());
-
-        var timeBegin = 0;
-        this.maxTime = 10000;
 
         var windowWidth = window.innerWidth - 10;
         var windowHeight = window.innerHeight - 10;
@@ -51,10 +51,9 @@ class Cyclotron {
         let timeHeight = windowHeight * 0.05;
 
         //scales
-        var x = d3.scaleLinear()
-            .domain([timeBegin, this.maxTime])
+        this.scaleX = d3.scaleLinear()
+            .domain([0, 1])
             .range([0, mainWidth]);
-        this.scaleX = x;
         this.svgChart = d3.select("body")
             .append("svg")
             .attr("width", windowWidth)
@@ -86,11 +85,19 @@ class Cyclotron {
             .attr("height", miniHeight)
             .attr("class", "mini");
 
+        // TODO: Print that we're waiting for data or something here.
+        this.setupScrubber();
+    }
+
+    public addEvent(event) {
+        this.spanManager.addEvent(event);
+        this.scaleX.domain([0, this.spanManager.maxTime]);
         this.drawScrubber();
+        this.drawMain();
     }
 
     private nodes(expanded_only = false) {
-        let root = new Root(this.spanManager, this.maxTime);
+        let root = new Root(this.spanManager);
         return d3.hierarchy(root, span => span.getChildren(!expanded_only));
     }
 
@@ -145,6 +152,9 @@ class Cyclotron {
         };
 
         let xPosition = d => { return x1(d.data.start); };
+        let yPosition = d => { return yScale(map[d.data.id].rowIdx); };
+        let computeWidth = d => { return x1(this.spanEnd(d.data)) - x1(d.data.start); };
+        let computeHeight = d => { return .8 * yScale(1); };
 
         // For already-visible spans, make sure they're positioned appropriately.
         //
@@ -153,7 +163,9 @@ class Cyclotron {
         let rects = this.mainPanel.selectAll("rect") // formerly itemRects
             .data(visItems, (d: any) => { return d.data.id; })
             .attr("x", xPosition)
-            .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
+            .attr("y", yPosition)
+            .attr("width", computeWidth)
+            .attr("height", computeHeight)
             .on("click", clickHandler)
             .style("opacity", 1.0);
 
@@ -165,15 +177,15 @@ class Cyclotron {
             .duration(100)
             .ease(d3.easeLinear)
             .style("opacity", 1.0)
-            .attr("y", function (d) { return yScale(map[d.data.id].rowIdx); });
+            .attr("y", d => { return yScale(map[d.data.id].rowIdx); });
 
         // For new entries, do the things.
         let newRects = rects.enter().append("rect")
-            .attr("class", function (d) { return "span"; })
+            .attr("class", d => { return "span"; })
             .attr("x", xPosition)
-            .attr("y", function (d) { return yScale(map[d.data.id].rowIdx); })
-            .attr("width", function (d) { return x1(d.data.end) - x1(d.data.start); })
-            .attr("height", function (d) { return .8 * yScale(1); })
+            .attr("y", yPosition)
+            .attr("width", computeWidth)
+            .attr("height", computeHeight)
             .attr("rx", 10)
             .attr("ry", 10)
             .on("click", clickHandler)
@@ -182,7 +194,7 @@ class Cyclotron {
         newRects.transition()
             .duration(150)
             .style("opacity", 1.0)
-            .attr("y", function (d) { return yScale(map[d.data.id].rowIdx); });
+            .attr("y", yPosition);
 
         rects.exit().remove();
 
@@ -200,10 +212,31 @@ class Cyclotron {
             .attr("text-anchor", "start");
 
         labels.exit().remove();
+    }
 
+    private setupScrubber() {
+        var brush = d3.brushX()
+            .extent([[0, 0], [this.layoutMainWidth, this.layoutScrubberHeight]])
+            .on("brush", () => {
+                this.scrubberStart = d3.event.selection.map(this.scaleX.invert)[0];
+                this.scrubberEnd = d3.event.selection.map(this.scaleX.invert)[1];
+                this.drawMain();
+            });
+        this.scrubberPanel.append("g")
+            .attr("class", "x brush")
+            .call(brush)
+            .selectAll("rect")
+            .attr("y", 0)
+            .attr("height", this.layoutScrubberHeight);
+    }
+
+    private spanEnd(span) {
+        return span.end || this.spanManager.maxTime;
     }
 
     private drawScrubber() {
+        this.scaleX.domain([0, this.spanManager.maxTime]);
+
         // Compute the layout.
         let map = {};
         let index = -1;
@@ -213,48 +246,36 @@ class Cyclotron {
                 rowIdx: ++index
             }
         })
-        console.log(map);
 
         let count: number = hierarchy.descendants().length;
+        console.log("scrubbin", count);
 
         // In the scrubber we always show everything expanded (for now).
         var yScaleMini = d3.scaleLinear()
             .domain([0, count])
             .range([0, this.layoutScrubberHeight]);
 
-        //mini item rects
-        this.scrubberPanel.append("g")
-            .selectAll("miniItems") // why do we filter by miniItems? what does this do?
-            .data(hierarchy.descendants())
-            .enter().append("rect")
-            .attr("class", d => { return "miniItem" + d.data.name; })
+        let minis = this.scrubberPanel.selectAll(".miniItems")
+            .data(hierarchy.descendants(), d => { return d.data.id; })
             .attr("x", d => { return this.scaleX(d.data.start); })
-            .attr("y", function (n) {
-                return yScaleMini(map[n.data.id].rowIdx) - 5; })
-            .attr("width", d => { return this.scaleX(d.data.end - d.data.start); })
+            .attr("y", d => { return yScaleMini(map[d.data.id].rowIdx) - 5; })
+            .attr("width", d => this.scaleX(this.spanEnd(d.data) - d.data.start));
+
+        minis.enter().append("rect")
+            .attr("class", d => { return "miniItems" })
+            .attr("x", d => { return this.scaleX(d.data.start); })
+            .attr("y", n => { return yScaleMini(map[n.data.id].rowIdx) - 5; })
+            .attr("width", d => this.scaleX(this.spanEnd(d.data) - d.data.start))
             .attr("height", 10);
 
-        var brush = d3.brushX()
-            .extent([[0, 0], [this.layoutMainWidth, this.layoutScrubberHeight]])
-            .on("brush", () => {
-                this.scrubberStart = d3.event.selection.map(this.scaleX.invert)[0];
-                this.scrubberEnd = d3.event.selection.map(this.scaleX.invert)[1];
-                this.drawMain();
-            });
-
-        this.scrubberPanel.append("g")
-            .attr("class", "x brush")
-            .call(brush)
-            .selectAll("rect")
-            .attr("y", 0)
-            .attr("height", this.layoutScrubberHeight);
+        minis.exit().remove();
     }
 }
 
 new Cyclotron();
 
-function test_events(manager) {
-    let events = [
+function test_events() {
+    return [
         {ThreadStart: {name: "Control", id: 0, ts: 0}},
         {AsyncStart: {name: "Scheduler", parent_id: 0, id: 1, ts: 0.10}},
         {AsyncStart: {name: "Downloader", parent_id: 0, id: 2, ts: 0.20}},
@@ -282,9 +303,8 @@ function test_events(manager) {
         {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 14, ts: 1370}},
         {AsyncEnd: {id: 14, ts: 1700, outcome: "Success"}},
         {AsyncEnd: {id: 13, ts: 1800, outcome: "Success"}},
-        {AsyncEnd: {id: 1, ts: 10000, outcome: "Success"}},
-        {AsyncEnd: {id: 2, ts: 10000, outcome: "Success"}},
-        {ThreadEnd: {id: 0, ts: 10000}},
+        {AsyncEnd: {id: 1, ts: 2000, outcome: "Success"}},
+        {AsyncEnd: {id: 2, ts: 2000, outcome: "Success"}},
+        {ThreadEnd: {id: 0, ts: 2000}},
     ];
-    events.forEach(function (e) {manager.addEvent(e)});
 }

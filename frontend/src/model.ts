@@ -110,10 +110,10 @@ class Root {
     public start;
     public end;
 
-    constructor(public manager, maxTime) {
+    constructor(public manager) {
         this.id = "root";
         this.start = 0;
-        this.end = maxTime;
+        this.end = manager.maxTime;
     }
 
     public intersects(start, end) {
@@ -134,10 +134,12 @@ class Root {
 class SpanManager {
     public spans;
     public threads;
+    public maxTime;
 
     constructor() {
         this.spans = {};
         this.threads = {};
+        this.maxTime = 0;
     }
 
     public getThread(name) {
@@ -159,13 +161,23 @@ class SpanManager {
         this.spans[span.id] = span
     }
 
+    private convertTs(ts) {
+        if (typeof ts !== "number") {
+            ts = ts.secs + ts.nanos * 1e-9;
+        }
+        if (ts > this.maxTime) {
+            this.maxTime = ts;
+        }
+        return ts;
+    }
+
     private spanStart(start) {
         let parent = this.getSpan(start.parent_id);
         let span = new Span(
             start.name,
             start.id,
             start.parent_id,
-            convertTs(start.ts),
+            this.convertTs(start.ts),
             start.metadata,
         );
 
@@ -186,23 +198,23 @@ class SpanManager {
             this.spanStart(event.AsyncStart);
         } else if (event.AsyncOnCPU) {
             let span = this.getSpan(event.AsyncOnCPU.id);
-            span.onCPU(convertTs(event.AsyncOnCPU.ts));
+            span.onCPU(this.convertTs(event.AsyncOnCPU.ts));
         } else if (event.AsyncOffCPU) {
             let span = this.getSpan(event.AsyncOffCPU.id);
-            span.offCPU(convertTs(event.AsyncOffCPU.ts));
+            span.offCPU(this.convertTs(event.AsyncOffCPU.ts));
         } else if (event.AsyncEnd) {
             let span = this.getSpan(event.AsyncEnd.id);
-            span.close(convertTs(event.AsyncEnd.ts));
+            span.close(this.convertTs(event.AsyncEnd.ts));
             span.outcome = event.outcome;
         } else if (event.SyncStart) {
             let span = this.spanStart(event.SyncStart);
-            span.onCPU(convertTs(event.SyncStart.ts));
+            span.onCPU(this.convertTs(event.SyncStart.ts));
         } else if (event.SyncEnd) {
             let span = this.getSpan(event.SyncEnd.id);
             if (span.scheduled.length !== 1) {
                 throw new Error("More than one schedule for sync span " + span.id);
             }
-            let ts = convertTs(event.SyncEnd.ts)
+            let ts = this.convertTs(event.SyncEnd.ts)
             span.offCPU(ts);
             span.close(ts);
         } else if (event.ThreadStart) {
@@ -214,7 +226,7 @@ class SpanManager {
                 start.name,
                 start.id,
                 null, // No parent on threads
-                convertTs(start.ts),
+                this.convertTs(start.ts),
                 null, // No metadata on threads
             );
             span.expanded = true;
@@ -222,20 +234,13 @@ class SpanManager {
             this.threads[start.name] = start.id;
         } else if (event.ThreadEnd) {
             let span = this.getSpan(event.ThreadEnd.id);
-            span.close(convertTs(event.ThreadEnd.ts));
+            span.close(this.convertTs(event.ThreadEnd.ts));
         } else if (event.Wakeup) {
             //console.log(event);
         } else {
             throw new Error("Unexpected event: " + event);
         }
     }
-}
-
-function convertTs(ts) {
-    if (typeof ts === "number") {
-        return ts;
-    }
-    return ts.secs + ts.nanos * 1e-9;
 }
 
 function ws_test() {
