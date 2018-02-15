@@ -1,9 +1,8 @@
 class Cyclotron {
-    private rootSpan;
-
     private svgChart;
     private mainPanel;
     private scrubberPanel;
+    private spanManager;
 
     private layoutMainWidth;
     private layoutMainHeight;
@@ -14,6 +13,7 @@ class Cyclotron {
 
     private scrubberStart;
     private scrubberEnd;
+    private maxTime;
 
     constructor() {
         // First some global configuration.
@@ -23,11 +23,8 @@ class Cyclotron {
             false
         );
 
-        let manager = new SpanManager();
-        test_events(manager);
-
-        let root = manager.getThread("Control");
-        this.rootSpan = root;
+        this.spanManager = new SpanManager();
+        test_events(this.spanManager);
 
         const SPAN_HEIGHT = 80;
         const MINI_SPAN_HEIGHT = 12;
@@ -38,7 +35,7 @@ class Cyclotron {
         console.log(hierarchy.descendants());
 
         var timeBegin = 0;
-        var timeEnd = 10000;
+        this.maxTime = 10000;
 
         var windowWidth = window.innerWidth - 10;
         var windowHeight = window.innerHeight - 10;
@@ -54,7 +51,7 @@ class Cyclotron {
 
         //scales
         var x = d3.scaleLinear()
-            .domain([timeBegin, timeEnd])
+            .domain([timeBegin, this.maxTime])
             .range([0, mainWidth]);
         this.scaleX = x;
         this.svgChart = d3.select("body")
@@ -85,14 +82,8 @@ class Cyclotron {
     }
 
     private nodes(expanded_only = false) {
-        let hierarchy = d3.hierarchy(this.rootSpan, span => {
-            if (!expanded_only || span.expanded) {
-                return span.children;
-            } else {
-                return [];
-            }
-        });
-        return hierarchy;  // TODO: filter out the root?
+        let root = new Root(this.spanManager, this.maxTime);
+        return d3.hierarchy(root, span => span.getChildren(!expanded_only));
     }
 
     private drawMain() {
@@ -214,7 +205,6 @@ class Cyclotron {
             .attr("class", d => { return "miniItem" + d.data.name; })
             .attr("x", d => { return this.scaleX(d.data.start); })
             .attr("y", function (n) {
-                // console.log("1querying " + n.data.id);
                 return yScaleMini(map[n.data.id].rowIdx) - 5; })
             .attr("width", d => { return this.scaleX(d.data.end - d.data.start); })
             .attr("height", 10);

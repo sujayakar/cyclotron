@@ -26,7 +26,7 @@ class Span {
     public outcome;
 
     // Derived from `parent_id` pointers.
-    public children;
+    private children;
     public expanded;
 
     constructor(
@@ -42,6 +42,14 @@ class Span {
 
         this.children = [];
         this.expanded = false;
+    }
+
+    public getChildren(forceExpanded) {
+        if (this.expanded || forceExpanded) {
+            return this.children;
+        } else {
+            return [];
+        }
     }
 
     public isOpen() {
@@ -94,6 +102,31 @@ class Span {
 
     public toString = () : string => {
         return `Span(id: ${this.id}, start: ${this.start}, end: ${this.end})`;
+    }
+}
+
+class Root {
+    public id;
+    public start;
+    public end;
+
+    constructor(public manager, maxTime) {
+        this.id = "root";
+        this.start = 0;
+        this.end = maxTime;
+    }
+
+    public intersects(start, end) {
+        return false;
+    }
+
+    public isOpen() {
+        return true;
+    }
+
+    public getChildren(force) {
+        return Object.keys(this.manager.threads)
+            .map(k => this.manager.spans[this.manager.threads[k]]);
     }
 }
 
