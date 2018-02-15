@@ -156,20 +156,10 @@ class Cyclotron {
         });
 
         // Compute a new order based on what's visible.
-        let map = {};
-        let index = -1;
         let prev = null;
-        hierarchy.eachBefore(n => {
-            let span = n.data;
-            if (span.intersects(this.scrubberStartTs(), this.scrubberEndTs())) {
-                if (prev && prev.mergeable(span)) {
-                    map[n.data.id] = { rowIdx: index };
-                } else {
-                    map[n.data.id] = { rowIdx: ++index };
-                }
-                prev = n.data;
-            }
-        })
+
+        let heightMap = this.computeHeights(hierarchy, this.scrubberStartTs(), this.scrubberEndTs());
+        let index = heightMap["index"];
 
         var x1 = d3.scaleLinear().range([0, this.layoutMainWidth]);
         x1.domain([this.scrubberStartTs(), this.scrubberEndTs()]);
@@ -177,9 +167,6 @@ class Cyclotron {
         // This scales all the spans to share the vertical space when they're fully expanded.
         //
         // We might want to use a fixed height here and scroll instead.
-        if (index < 0) {
-            index = 0;
-        }
         let viewHeight = this.layoutMainHeight - 60;
         let defaultHeight = 40 * index;
         if (defaultHeight < viewHeight) {
@@ -196,9 +183,9 @@ class Cyclotron {
         };
 
         let xPosition = d => { return x1(d.data.start); };
-        let yPosition = d => { return yScale(map[d.data.id].rowIdx); };
+        let yPosition = d => { return yScale(heightMap[d.data.id]); };
         let computeWidth = d => { return x1(this.spanEnd(d.data)) - x1(d.data.start); };
-        let computeHeight = d => { return .8 * yScale(1); };
+        let computeHeight = d => { return .95 * yScale(1); };
 
         // For already-visible spans, make sure they're positioned appropriately.
         //
@@ -248,13 +235,13 @@ class Cyclotron {
         var labels = this.mainPanel.selectAll("text") // formerly itemRects.selectAll("text")
             .data(visItems, (d: any) => { return d.data.id; })
             .attr("x", d => { return x1(Math.max(d.data.start, this.scrubberStartTs())); })
-            .attr("y", d => { return yScale(map[d.data.id].rowIdx) + 20; });
+            .attr("y", d => { return yScale(heightMap[d.data.id]) + 20; });
 
         labels.enter().append("text")
             .text(d => { return d.data.name; })
             .attr("class", "span-text") // why doesn't this work? why inline fill???
             .attr("x", xPosition)
-            .attr("y", d => { return yScale(map[d.data.id].rowIdx) + 20; })
+            .attr("y", d => { return yScale(heightMap[d.data.id]) + 20; })
             .attr("text-anchor", "start");
 
         labels.exit().remove();
@@ -280,38 +267,69 @@ class Cyclotron {
         return span.end || this.spanManager.maxTime;
     }
 
-    private drawWakeups() {
-        // Okay, now draw the arrows
-        let toDraw = this.spanManager.wakeups.filter(w => {
-            if (!map[w.waking_id] || !map[w.parked_id]) {
-                return false;
-            }
-            if (w.ts < scrubberDomain[0] || w.ts > scrubberDomain[1]) {
-                return false;
-            }
-            return true;
-        });
-        console.log(`Found ${toDraw.length} arrows`);
-        let wakeups = this.mainPanel.selectAll("line")
-            .data(toDraw, (d) => { return d.id })
-            .attr("x1", (d) => { return x1(d.ts) })
-            .attr("y1", (d) => { return yScale(map[d.waking_id].rowIdx) })
-            .attr("x2", (d) => { return x1(d.ts) + 5 })
-            .attr("y2", (d) => { return yScale(map[d.waking_id].rowIdx) + 5 })
-            .style("stroke", "rgb(255,0,0)")
-            .style("stroke-width", "2");
+    private computeHeights(hierarchy, startTs, endTs) {
+        var heightMap = {};
+        var index = -1;
+        var node = hierarchy, stack = [hierarchy], children, i;
+        var prev = null;
 
-        wakeups.enter().append("line")
-            .data(toDraw, (d) => { return d.id })
-            .attr("x1", (d) => { return x1(d.ts) })
-            .attr("y1", (d) => { return yScale(map[d.waking_id].rowIdx) })
-            .attr("x2", (d) => { return x1(d.ts) + 5 })
-            .attr("y2", (d) => { return yScale(map[d.parked_id].rowIdx) })
-            .style("stroke", "rgb(255,0,0)")
-            .style("stroke-width", "1");
+        while (node = stack.pop()) {
+            let span = node.data;
+            if (span.intersects(startTs, endTs)) {
+                if (prev && prev.mergeable(span)) {
+                    heightMap[span.id] = index;
+                } else {
+                    heightMap[span.id] = ++index;
+                }
+                prev = span;
+            }
 
-        wakeups.exit().remove();
+            children = node.children;
+            if (children) for (i = children.length - 1; i >= 0; --i) {
+                stack.push(children[i])
+            }
+        }
+
+        if (index < 0) {
+            index = 0;
+        }
+
+        heightMap["index"] = index;
+        return heightMap;
     }
+
+    // private drawWakeups() {
+    //     // Okay, now draw the arrows
+    //     let toDraw = this.spanManager.wakeups.filter(w => {
+    //         if (!map[w.waking_id] || !map[w.parked_id]) {
+    //             return false;
+    //         }
+    //         if (w.ts < scrubberDomain[0] || w.ts > scrubberDomain[1]) {
+    //             return false;
+    //         }
+    //         return true;
+    //     });
+    //     console.log(`Found ${toDraw.length} arrows`);
+    //     let wakeups = this.mainPanel.selectAll("line")
+    //         .data(toDraw, (d) => { return d.id })
+    //         .attr("x1", (d) => { return x1(d.ts) })
+    //         .attr("y1", (d) => { return yScale(map[d.waking_id]) })
+    //         .attr("x2", (d) => { return x1(d.ts) + 5 })
+    //         .attr("y2", (d) => { return yScale(map[d.waking_id]) + 5 })
+    //         .style("stroke", "rgb(255,0,0)")
+    //         .style("stroke-width", "2");
+
+    //     wakeups.enter().append("line")
+    //         .data(toDraw, (d) => { return d.id })
+    //         .attr("x1", (d) => { return x1(d.ts) })
+    //         .attr("y1", (d) => { return yScale(map[d.waking_id]) })
+    //         .attr("x2", (d) => { return x1(d.ts) + 5 })
+    //         .attr("y2", (d) => { return yScale(map[d.parked_id]) })
+    //         .style("stroke", "rgb(255,0,0)")
+    //         .style("stroke-width", "1");
+
+    //     wakeups.exit().remove();
+    // }
 
     private drawScrubber() {
         this.scaleX.domain([0, this.spanManager.maxTime]);
