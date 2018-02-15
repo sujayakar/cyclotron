@@ -25,6 +25,28 @@ class Cyclotron {
             false
         );
 
+        d3.select("body")
+            .on("keydown", () => {
+                let zoomWidth = this.scrubberEnd - this.scrubberStart;
+                if (d3.event.keyCode == 87) { // W
+                    this.scrubberStart = this.scrubberStart + zoomWidth * 0.05;
+                    this.scrubberEnd = this.scrubberEnd - zoomWidth * 0.05;
+                    this.drawMain();
+                } else if (d3.event.keyCode == 83) { // S
+                    this.scrubberStart = this.scrubberStart - zoomWidth * 0.05;
+                    this.scrubberEnd = this.scrubberEnd + zoomWidth * 0.05;
+                    this.drawMain();
+                } else if (d3.event.keyCode == 65) { // A
+                    this.scrubberStart = this.scrubberStart - zoomWidth * 0.05;
+                    this.scrubberEnd = this.scrubberEnd - zoomWidth * 0.05;
+                    this.drawMain();
+                } else if (d3.event.keyCode == 68) { // D
+                    this.scrubberStart = this.scrubberStart + zoomWidth * 0.05;
+                    this.scrubberEnd = this.scrubberEnd + zoomWidth * 0.05;
+                    this.drawMain();
+                }
+            });
+
         this.spanManager = new SpanManager();
 
         const SPAN_HEIGHT = 80;
