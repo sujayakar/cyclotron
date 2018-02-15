@@ -96,10 +96,12 @@ class Cyclotron {
 
     private drawMain() {
         // Update the axis at the top.
-        let axisScale = d3.scaleLinear()
-            .domain([this.scrubberStart, this.scrubberEnd])
+        let axisScale = d3.scaleTime()
+            .domain([new Date(0, 0, 0, 0, 0, this.scrubberStart), new Date(0, 0, 0, 0, 0, this.scrubberEnd)])
             .range([0, this.layoutMainWidth]);
-        this.topAxis.call(d3.axisBottom(axisScale));
+        this.topAxis.call(d3.axisBottom(axisScale).tickFormat((d: any) => {
+            return d3.timeFormat("%Mm %Ss")(d);
+        }));
 
         let hierarchy = this.nodes(true);
 
