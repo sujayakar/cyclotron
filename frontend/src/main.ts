@@ -84,6 +84,8 @@ class Cyclotron {
         socket.onerror = event => { alert(`Socket error ${event}`); };
         socket.onclose = event => { alert(`Socket closed ${event}`); };
 
+        this.drawMain();
+
         // test_events().forEach((e, i) => { setTimeout(() => { this.addEvent(e); }, i * 100); })
     }
 
@@ -110,18 +112,26 @@ class Cyclotron {
         this.drawScrubber();
 
         // Update the axis at the top.
+        let scrubberDomain = [this.scrubberStartTs(), this.scrubberEndTs()];
         let axisScale = d3.scaleLinear()
-            .domain([this.scrubberStartTs(), this.scrubberEndTs()])
+            .domain(scrubberDomain)
             .range([0, this.layoutMainWidth]);
-        this.topAxis.call(d3.axisBottom(axisScale).tickFormat((seconds: number) => {
-            let d = new Date(0, 0, 0, 0, 0, seconds);
-            if (seconds < 5) {
-                return d3.timeFormat("%-Lms")(d);
-            } else if (seconds < 60) {
-                return d3.timeFormat("%-Ss")(d);
-            } else {
-                return d3.timeFormat("%-Mm %-Ss")(d);
+        this.topAxis.call(d3.axisBottom(axisScale).ticks(5).tickFormat((seconds: number) => {
+            let domainWidth = scrubberDomain[1] - scrubberDomain[0];
+            let delta = seconds - scrubberDomain[0];
+
+            function formatTime(n, precision) {
+                if (n < 0.001) {
+                    return `${(n * 1e6).toFixed(precision)}us`;
+                } else if (n < 1) {
+                    return `${(n * 1e3).toFixed(precision)}ms`;
+                } else if (n < 60) {
+                    return `${n.toFixed(precision)}s`;
+                } else {
+                    return `${(n / 60).toFixed(precision)}m`;
+                }
             }
+            return `${formatTime(scrubberDomain[0], 0)}/${formatTime(delta, 2)}`;
         }));
 
         let hierarchy = this.nodes(true);
