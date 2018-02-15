@@ -8,6 +8,7 @@ class Cyclotron {
     private layoutMainWidth;
     private layoutMainHeight;
     private layoutScrubberHeight;
+    private layoutTimelineHeight;
 
     private scaleX: d3.ScaleLinear<number, number>;
 
@@ -31,13 +32,7 @@ class Cyclotron {
         const SPAN_HEIGHT = 80;
         const MINI_SPAN_HEIGHT = 12;
 
-        var hierarchy = d3.hierarchy(root, span => {
-            if (span.expanded) {
-                return span.children;
-            } else {
-                return [];
-            }
-        });
+        var hierarchy = this.nodes();
         let count: number = hierarchy.descendants().length;
         console.log(count);
         console.log(hierarchy.descendants());
@@ -49,12 +44,13 @@ class Cyclotron {
         var windowHeight = window.innerHeight - 10;
 
         let leftPadding = 100;
-        let mainHeight = windowHeight * 0.8;
+        let mainHeight = windowHeight * 0.75;
         this.layoutMainHeight = mainHeight;
         let mainWidth = windowWidth - leftPadding;
         this.layoutMainWidth = mainWidth;
         let miniHeight = windowHeight * 0.2;
         this.layoutScrubberHeight = miniHeight;
+        let timeHeight = windowHeight * 0.05;
 
         //scales
         var x = d3.scaleLinear()
@@ -103,14 +99,14 @@ class Cyclotron {
         let hierarchy = this.nodes(true);
 
         let visItems = hierarchy.descendants().filter(d => {
-            return d.data.start < this.scrubberEnd && d.data.end > this.scrubberStart;
+            return d.data.intersects(this.scrubberStart, this.scrubberEnd);
         });
 
         // Compute a new order based on what's visible.
         let map = {};
         let index = -1;
         hierarchy.eachBefore(n => {
-            if (n.data.start < this.scrubberEnd && n.data.end > this.scrubberStart) {
+            if (n.data.intersects(this.scrubberStart, this.scrubberEnd)) {
                 map[n.data.id] = {
                     rowIdx: ++index
                 }
@@ -149,7 +145,8 @@ class Cyclotron {
         // Note that this cancels the previous transition from when the object was newly created,
         // so it should match exactly.
         rects.transition()
-            .duration(250)
+            .duration(100)
+            .ease(d3.easeLinear)
             .style("opacity", 1.0)
             .attr("y", function (d) { return yScale(map[d.data.id].rowIdx); });
 
@@ -266,10 +263,10 @@ function test_events(manager) {
         {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 12, ts: 1270}},
         {AsyncEnd: {id: 11, ts: 1360, outcome: "Success"}},
         {AsyncEnd: {id: 12, ts: 1365, outcome: "Success"}},
-        {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 13, ts: 1370}},
-        {AsyncEnd: {id: 13, ts: 1640, outcome: "Success"}},
-        {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 14, ts: 1645}},
-        {AsyncEnd: {id: 14, ts: 1365, outcome: "Success"}},
+        {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 13, ts: 1365}},
+        {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 14, ts: 1370}},
+        {AsyncEnd: {id: 14, ts: 1700, outcome: "Success"}},
+        {AsyncEnd: {id: 13, ts: 1800, outcome: "Success"}},
         {AsyncEnd: {id: 1, ts: 10000, outcome: "Success"}},
         {AsyncEnd: {id: 2, ts: 10000, outcome: "Success"}},
         {ThreadEnd: {id: 0, ts: 10000}},

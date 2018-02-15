@@ -13,6 +13,9 @@ class OnCPU {
         if (!this.isOpen()) {
             throw new Error("Double close on trace");
         }
+        if (this.start > this.end) {
+            throw new Error("Trace wth start after end");
+        }
         this.end = ts;
     }
 }
@@ -38,11 +41,15 @@ class Span {
         this.outcome = null;
 
         this.children = [];
-        this.expanded = true;
+        this.expanded = false;
     }
 
     public isOpen() {
         return this.end === null;
+    }
+
+    public intersects(start, end) {
+        return this.start < end && (this.end === null || this.end > start);
     }
 
     public close(ts) {
@@ -54,7 +61,9 @@ class Span {
                 throw new Error("Closing with open trace for " + this.id);
             }
         }
-
+        if (this.start > ts) {
+            throw new Error("Span with start after end " + this.id);
+        }
         this.end = ts;
     }
 
@@ -175,6 +184,7 @@ class SpanManager {
                 convertTs(start.ts),
                 null, // No metadata on threads
             );
+            span.expanded = true;
             this.addSpan(span);
             this.threads[start.name] = start.id;
         } else if (event.ThreadEnd) {
