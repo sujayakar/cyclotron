@@ -4,17 +4,47 @@ use std::ops::{
     Deref,
     DerefMut,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use futures::{
     Async,
     Future,
     Poll,
 };
-use futures::task::AtomicTask;
+use futures::task::{
+    self,
+    Task,
+};
 use futures::executor::{Notify, NotifyHandle, spawn};
 use serde_json;
 use event::{AsyncOutcome, SpanId, TraceEvent};
 use state::TRACER_STATE;
+
+/// Atomic slot of a single parked task.  Note that this only parks at most one
+/// task: If your data-structure needs to wakeup potentially many threads, using
+/// `TaskSlot` will cause a deadlock.  Compare `FutureSet` with `TicketMaster`
+/// for an example.
+#[derive(Default)]
+pub struct AtomicTask {
+    task: Mutex<Option<Task>>,
+}
+
+impl AtomicTask {
+    pub fn notify(&self) {
+        if let Some(task) = self.task.lock().unwrap().take() {
+            task.notify();
+        }
+    }
+
+    pub fn park(&self) {
+        let mut task = self.task.lock().unwrap();
+        if let Some(ref task) = *task {
+            if task.will_notify_current() {
+                return;
+            }
+        }
+        *task = Some(task::current());
+    }
+}
 
 pub trait TraceFuture: Future + Sized where Self::Error : Debug {
     fn traced<S: Into<String>>(self, name: S) -> TracedFuture<Self> {
@@ -115,8 +145,8 @@ impl<F: Future> Future for TracedFuture<F> where F::Error : Debug {
                 (parent_id, span_id)
             };
 
-            let notifier = Notifier { parent_task: AtomicTask::new(), parked_span: span_id };
-            notifier.parent_task.register();
+            let notifier = Notifier { parent_task: AtomicTask::default(), parked_span: span_id };
+            notifier.parent_task.park();
             let handle = NotifyHandle::from(Arc::new(notifier));
 
             let result = {

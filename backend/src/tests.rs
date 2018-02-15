@@ -6,9 +6,10 @@ use futures::{
     Future,
     Stream,
 };
+use std::sync::{Arc, Mutex};
 use futures::sync::oneshot;
 use futures::stream::futures_unordered::FuturesUnordered;
-
+use state::Logger;
 use ::{
     DebugLogger,
     TracedThread,
@@ -27,7 +28,8 @@ fn test_sync() {
 
 #[test]
 fn test_async() {
-    let logger = JsonWriter::new(File::create("/tmp/test.log").unwrap());
+    let mut logger = Arc::new(Mutex::new(JsonWriter::new(File::create("/tmp/test.log").unwrap())));
+
     let _thread = TracedThread::new("test_async", Box::new(logger.clone()));
 
     let (txs, rxs) = (0..10).map(|_| oneshot::channel::<usize>())

@@ -17,7 +17,7 @@ pub mod json;
 pub use async::{TraceFuture, TracedFuture};
 pub use event::TraceEvent;
 pub use sync::{TracedThread, SyncSpan};
-pub use state::DebugLogger;
+pub use state::{DebugLogger, NoopLogger, Logger};
 
 #[cfg(test)]
 mod tests;

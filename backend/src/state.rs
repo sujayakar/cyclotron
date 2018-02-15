@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::time::{Duration, Instant, SystemTime};
+use std::sync::{Arc, Mutex};
 
 use event::{SpanId, TraceEvent};
 
@@ -10,14 +11,32 @@ lazy_static! {
     static ref EPOCH: (SystemTime, Instant) = (SystemTime::now(), Instant::now());
 }
 
-pub trait Logger {
+pub trait Logger: Send {
     fn write(&mut self, event: TraceEvent);
+    fn flush(&mut self) {
+    }
 }
 
 pub struct DebugLogger;
 impl Logger for DebugLogger {
     fn write(&mut self, event: TraceEvent) {
         eprintln!("{:?}", event);
+    }
+}
+
+impl<T: Logger> Logger for Arc<Mutex<T>> {
+    fn write(&mut self, event: TraceEvent) {
+        self.lock().unwrap().write(event)
+    }
+    fn flush(&mut self) {
+        self.lock().unwrap().flush()
+    }
+}
+
+#[derive(Clone)]
+pub struct NoopLogger;
+impl Logger for NoopLogger {
+    fn write(&mut self, _: TraceEvent) {
     }
 }
 
@@ -48,7 +67,7 @@ impl Default for TracerState {
 
 impl TracerState {
     pub fn start(&mut self, writer: Box<Logger>) {
-        assert!(self.writer.is_none());
+        // assert!(self.writer.is_none());
         self.writer = Some(writer);
     }
 

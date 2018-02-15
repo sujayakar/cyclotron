@@ -80,7 +80,7 @@ class Cyclotron {
 
         var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
         socket.onmessage = event => { this.addEvent(JSON.parse(event.data)); };
-        socket.onopen = event => { socket.send("test.log"); };
+        socket.onopen = event => { socket.send("empty_file_release.log"); };
         socket.onerror = event => { alert(`Socket error ${event}`); };
         socket.onclose = event => { alert(`Socket closed ${event}`); };
 
@@ -158,9 +158,14 @@ class Cyclotron {
         // This scales all the spans to share the vertical space when they're fully expanded.
         //
         // We might want to use a fixed height here and scroll instead.
+        let viewHeight = this.layoutMainHeight - 60;
+        let defaultHeight = 40 * visItems.length;
+        if (defaultHeight < viewHeight) {
+            viewHeight = defaultHeight;
+        }
         var yScale = d3.scaleLinear()
-            .domain([0, this.nodes().descendants().length])
-            .range([0, this.layoutMainHeight]);
+            .domain([0, visItems.length])
+            .range([0, viewHeight]);
 
         let clickHandler = node => { // we should set this up once at the beginning
             console.log("got clicked: " + node.data.name);
