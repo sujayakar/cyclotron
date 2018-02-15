@@ -80,7 +80,7 @@ class Cyclotron {
 
         var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
         socket.onmessage = event => { this.addEvent(JSON.parse(event.data)); };
-        socket.onopen = event => { socket.send("empty_file_release.log"); };
+        socket.onopen = event => { socket.send("empty_file.log"); };
         socket.onerror = event => { alert(`Socket error ${event}`); };
         socket.onclose = event => { alert(`Socket closed ${event}`); };
 
