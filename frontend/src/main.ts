@@ -96,11 +96,18 @@ class Cyclotron {
 
     private drawMain() {
         // Update the axis at the top.
-        let axisScale = d3.scaleTime()
-            .domain([new Date(0, 0, 0, 0, 0, this.scrubberStart), new Date(0, 0, 0, 0, 0, this.scrubberEnd)])
+        let axisScale = d3.scaleLinear()
+            .domain([this.scrubberStart, this.scrubberEnd])
             .range([0, this.layoutMainWidth]);
-        this.topAxis.call(d3.axisBottom(axisScale).tickFormat((d: any) => {
-            return d3.timeFormat("%Mm %Ss")(d);
+        this.topAxis.call(d3.axisBottom(axisScale).tickFormat((seconds: number) => {
+            let d = new Date(0, 0, 0, 0, 0, seconds);
+            if (seconds < 5) {
+                return d3.timeFormat("%-Lms")(d);
+            } else if (seconds < 60) {
+                return d3.timeFormat("%-Ss")(d);
+            } else {
+                return d3.timeFormat("%-Mm %-Ss")(d);
+            }
         }));
 
         let hierarchy = this.nodes(true);
@@ -249,8 +256,8 @@ new Cyclotron();
 function test_events(manager) {
     let events = [
         {ThreadStart: {name: "Control", id: 0, ts: 0}},
-        {AsyncStart: {name: "Scheduler", parent_id: 0, id: 1, ts: 0}},
-        {AsyncStart: {name: "Downloader", parent_id: 0, id: 2, ts: 0}},
+        {AsyncStart: {name: "Scheduler", parent_id: 0, id: 1, ts: 0.10}},
+        {AsyncStart: {name: "Downloader", parent_id: 0, id: 2, ts: 0.20}},
         {AsyncStart: {name: "PreLocal", parent_id: 0, id: 3, ts: 265}},
         {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 4, ts: 300}},
         {AsyncEnd: {id: 3, ts: 420, outcome: "Success"}},
