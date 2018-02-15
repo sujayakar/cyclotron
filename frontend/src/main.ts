@@ -4,6 +4,7 @@ class Cyclotron {
     private mainPanel;
     private scrubberPanel;
     private spanManager;
+    private scrubberBrush;
 
     private layoutMainWidth;
     private layoutMainHeight;
@@ -25,26 +26,53 @@ class Cyclotron {
             false
         );
 
+        let zoomIn = () => {
+            let zoomWidth = this.scrubberEnd - this.scrubberStart;
+            this.scrubberStart = this.scrubberStart + zoomWidth * 0.05;
+            this.scrubberEnd = this.scrubberEnd - zoomWidth * 0.05;
+            this.drawMain();
+        };
+        let zoomOut = () => {
+            let zoomWidth = this.scrubberEnd - this.scrubberStart;
+            this.scrubberStart = this.scrubberStart - zoomWidth * 0.05;
+            this.scrubberEnd = this.scrubberEnd + zoomWidth * 0.05;
+            this.drawMain();
+        };
+        let panLeft = () => {
+            let zoomWidth = this.scrubberEnd - this.scrubberStart;
+            this.scrubberStart = this.scrubberStart - zoomWidth * 0.05;
+            this.scrubberEnd = this.scrubberEnd - zoomWidth * 0.05;
+            this.drawMain();
+        };
+        let panRight = () => {
+            let zoomWidth = this.scrubberEnd - this.scrubberStart;
+            this.scrubberStart = this.scrubberStart + zoomWidth * 0.05;
+            this.scrubberEnd = this.scrubberEnd + zoomWidth * 0.05;
+            this.drawMain();
+        }
+
         d3.select("body")
             .on("keydown", () => {
-                let zoomWidth = this.scrubberEnd - this.scrubberStart;
+                if (!this.scrubberStart) return;
                 if (d3.event.keyCode == 87) { // W
-                    this.scrubberStart = this.scrubberStart + zoomWidth * 0.05;
-                    this.scrubberEnd = this.scrubberEnd - zoomWidth * 0.05;
-                    this.drawMain();
+                    zoomIn();
                 } else if (d3.event.keyCode == 83) { // S
-                    this.scrubberStart = this.scrubberStart - zoomWidth * 0.05;
-                    this.scrubberEnd = this.scrubberEnd + zoomWidth * 0.05;
-                    this.drawMain();
+                    zoomOut();
                 } else if (d3.event.keyCode == 65) { // A
-                    this.scrubberStart = this.scrubberStart - zoomWidth * 0.05;
-                    this.scrubberEnd = this.scrubberEnd - zoomWidth * 0.05;
-                    this.drawMain();
+                    panLeft();
                 } else if (d3.event.keyCode == 68) { // D
-                    this.scrubberStart = this.scrubberStart + zoomWidth * 0.05;
-                    this.scrubberEnd = this.scrubberEnd + zoomWidth * 0.05;
-                    this.drawMain();
+                    panRight();
                 }
+                d3.select(".brush").call(this.scrubberBrush.move, [this.scrubberStart, this.scrubberEnd]);
+            })
+            .on("wheel.zoom", () => {
+                if (!this.scrubberStart) return;
+                if (d3.event.wheelDeltaY > 0) {
+                    zoomIn();
+                } else if (d3.event.wheelDeltaY < 0) {
+                    zoomOut();
+                }
+                d3.select(".brush").call(this.scrubberBrush.move, [this.scrubberStart, this.scrubberEnd]);
             });
 
         this.spanManager = new SpanManager();
@@ -100,9 +128,23 @@ class Cyclotron {
             .attr("height", miniHeight)
             .attr("class", "mini");
 
-        // TODO: Print that we're waiting for data or something here.
-        this.setupScrubber();
 
+        this.scrubberBrush = d3.brushX()
+            .extent([[0, 0], [this.layoutMainWidth, this.layoutScrubberHeight]])
+            .on("brush", () => {
+                console.log("BRUSHED");
+                this.scrubberStart = d3.event.selection[0];
+                this.scrubberEnd = d3.event.selection[1];
+                this.drawMain();
+            });
+        this.scrubberPanel.append("g")
+            .attr("class", "x brush")
+            .call(this.scrubberBrush)
+            .selectAll("rect")
+            .attr("y", 0)
+            .attr("height", this.layoutScrubberHeight);
+
+        // TODO: Print that we're waiting for data or something here.
         var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
         socket.onmessage = event => { this.addEvent(JSON.parse(event.data)); };
         socket.onopen = event => { socket.send("empty_file_release.log"); };
@@ -267,22 +309,6 @@ class Cyclotron {
             .attr("text-anchor", "start");
 
         labels.exit().remove();
-    }
-
-    private setupScrubber() {
-        var brush = d3.brushX()
-            .extent([[0, 0], [this.layoutMainWidth, this.layoutScrubberHeight]])
-            .on("brush", () => {
-                this.scrubberStart = d3.event.selection[0];
-                this.scrubberEnd = d3.event.selection[1];
-                this.drawMain();
-            });
-        this.scrubberPanel.append("g")
-            .attr("class", "x brush")
-            .call(brush)
-            .selectAll("rect")
-            .attr("y", 0)
-            .attr("height", this.layoutScrubberHeight);
     }
 
     private spanEnd(span) {
