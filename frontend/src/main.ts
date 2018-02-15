@@ -34,11 +34,11 @@ class Cyclotron {
         var windowHeight = window.innerHeight - 10;
 
         let leftPadding = 100;
-        let mainHeight = windowHeight * 0.75;
+        let mainHeight = windowHeight * 0.85;
         this.layoutMainHeight = mainHeight;
         let mainWidth = windowWidth - leftPadding;
         this.layoutMainWidth = mainWidth;
-        let miniHeight = windowHeight * 0.2;
+        let miniHeight = windowHeight * 0.1;
         this.layoutScrubberHeight = miniHeight;
         let timeHeight = windowHeight * 0.05;
         this.queuedRedraw = false;
@@ -258,7 +258,29 @@ class Cyclotron {
             .attr("text-anchor", "start");
 
         labels.exit().remove();
+    }
 
+    private setupScrubber() {
+        var brush = d3.brushX()
+            .extent([[0, 0], [this.layoutMainWidth, this.layoutScrubberHeight]])
+            .on("brush", () => {
+                this.scrubberStart = d3.event.selection[0];
+                this.scrubberEnd = d3.event.selection[1];
+                this.drawMain();
+            });
+        this.scrubberPanel.append("g")
+            .attr("class", "x brush")
+            .call(brush)
+            .selectAll("rect")
+            .attr("y", 0)
+            .attr("height", this.layoutScrubberHeight);
+    }
+
+    private spanEnd(span) {
+        return span.end || this.spanManager.maxTime;
+    }
+
+    private drawWakeups() {
         // Okay, now draw the arrows
         let toDraw = this.spanManager.wakeups.filter(w => {
             if (!map[w.waking_id] || !map[w.parked_id]) {
@@ -289,26 +311,6 @@ class Cyclotron {
             .style("stroke-width", "1");
 
         wakeups.exit().remove();
-    }
-
-    private setupScrubber() {
-        var brush = d3.brushX()
-            .extent([[0, 0], [this.layoutMainWidth, this.layoutScrubberHeight]])
-            .on("brush", () => {
-                this.scrubberStart = d3.event.selection[0];
-                this.scrubberEnd = d3.event.selection[1];
-                this.drawMain();
-            });
-        this.scrubberPanel.append("g")
-            .attr("class", "x brush")
-            .call(brush)
-            .selectAll("rect")
-            .attr("y", 0)
-            .attr("height", this.layoutScrubberHeight);
-    }
-
-    private spanEnd(span) {
-        return span.end || this.spanManager.maxTime;
     }
 
     private drawScrubber() {
@@ -342,7 +344,7 @@ class Cyclotron {
             .attr("x", d => { return this.scaleX(d.data.start); })
             .attr("y", n => { return yScaleMini(map[n.data.id].rowIdx) - 5; })
             .attr("width", d => this.scaleX(this.spanEnd(d.data) - d.data.start))
-            .attr("height", 2);
+            .attr("height", 1);
 
         minis.exit().remove();
     }
