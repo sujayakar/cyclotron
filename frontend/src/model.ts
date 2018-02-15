@@ -41,7 +41,7 @@ class Span {
         this.outcome = null;
 
         this.children = [];
-        this.expanded = false;
+        this.expanded = true;
     }
 
     public getChildren(forceExpanded) {

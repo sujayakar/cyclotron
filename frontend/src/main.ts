@@ -89,8 +89,6 @@ class Cyclotron {
 
     public addEvent(event) {
         this.spanManager.addEvent(event);
-        this.scaleX.domain([0, this.spanManager.maxTime]);
-        this.drawScrubber();
         this.drawMain();
     }
 
@@ -99,10 +97,21 @@ class Cyclotron {
         return d3.hierarchy(root, span => span.getChildren(!expanded_only));
     }
 
+    private scrubberStartTs() {
+        return this.scaleX.invert(this.scrubberStart);
+    }
+
+    private scrubberEndTs() {
+        return this.scaleX.invert(this.scrubberEnd);
+    }
+
     private drawMain() {
+        this.scaleX.domain([0, this.spanManager.maxTime]);
+        this.drawScrubber();
+
         // Update the axis at the top.
         let axisScale = d3.scaleLinear()
-            .domain([this.scrubberStart, this.scrubberEnd])
+            .domain([this.scrubberStartTs(), this.scrubberEndTs()])
             .range([0, this.layoutMainWidth]);
         this.topAxis.call(d3.axisBottom(axisScale).tickFormat((seconds: number) => {
             let d = new Date(0, 0, 0, 0, 0, seconds);
@@ -118,14 +127,14 @@ class Cyclotron {
         let hierarchy = this.nodes(true);
 
         let visItems = hierarchy.descendants().filter(d => {
-            return d.data.intersects(this.scrubberStart, this.scrubberEnd);
+            return d.data.intersects(this.scrubberStartTs(), this.scrubberEndTs());
         });
 
         // Compute a new order based on what's visible.
         let map = {};
         let index = -1;
         hierarchy.eachBefore(n => {
-            if (n.data.intersects(this.scrubberStart, this.scrubberEnd)) {
+            if (n.data.intersects(this.scrubberStartTs(), this.scrubberEndTs())) {
                 map[n.data.id] = {
                     rowIdx: ++index
                 }
@@ -134,7 +143,7 @@ class Cyclotron {
 
         console.log("Visible items: " + visItems.length);
         var x1 = d3.scaleLinear().range([0, this.layoutMainWidth]);
-        x1.domain([this.scrubberStart, this.scrubberEnd]);
+        x1.domain([this.scrubberStartTs(), this.scrubberEndTs()]);
 
         // This scales all the spans to share the vertical space when they're fully expanded.
         //
@@ -198,7 +207,7 @@ class Cyclotron {
         // same deal w/ the text
         var labels = this.mainPanel.selectAll("text") // formerly itemRects.selectAll("text")
             .data(visItems, (d: any) => { return d.data.id; })
-            .attr("x", d => { return x1(Math.max(d.data.start, this.scrubberStart)); })
+            .attr("x", d => { return x1(Math.max(d.data.start, this.scrubberStartTs())); })
             .attr("y", d => { return yScale(map[d.data.id].rowIdx) + 20; });
 
         labels.enter().append("text")
@@ -215,8 +224,8 @@ class Cyclotron {
         var brush = d3.brushX()
             .extent([[0, 0], [this.layoutMainWidth, this.layoutScrubberHeight]])
             .on("brush", () => {
-                this.scrubberStart = d3.event.selection.map(this.scaleX.invert)[0];
-                this.scrubberEnd = d3.event.selection.map(this.scaleX.invert)[1];
+                this.scrubberStart = d3.event.selection[0];
+                this.scrubberEnd = d3.event.selection[1];
                 this.drawMain();
             });
         this.scrubberPanel.append("g")
@@ -245,7 +254,6 @@ class Cyclotron {
         })
 
         let count: number = hierarchy.descendants().length;
-        console.log("scrubbin", count);
 
         // In the scrubber we always show everything expanded (for now).
         var yScaleMini = d3.scaleLinear()
@@ -263,7 +271,7 @@ class Cyclotron {
             .attr("x", d => { return this.scaleX(d.data.start); })
             .attr("y", n => { return yScaleMini(map[n.data.id].rowIdx) - 5; })
             .attr("width", d => this.scaleX(this.spanEnd(d.data) - d.data.start))
-            .attr("height", 10);
+            .attr("height", 2);
 
         minis.exit().remove();
     }
