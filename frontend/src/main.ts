@@ -296,13 +296,7 @@ class Cyclotron {
             }
             return start;
         };
-        let yPosition = d => {
-            let r = yScale(heightMap[d.data.id]);
-            if (Number.isNaN(r)) {
-                debugger;
-            }
-            return r;
-        };
+        let yPosition = d => { return yScale(heightMap[d.data.id]) };
         let computeWidth = d => {
             let start = screenX(d.data.start);
             if (start < 0) {
@@ -347,6 +341,17 @@ class Cyclotron {
             .clamp(true)
             .range(["#4caf50", "#e88b01", "#af4c4c"]);
 
+        // Make sure text shows correctly.
+        let text = d =>  {
+            if (d.data.expanded)
+                return "▼ " + d.data.name;
+            else
+                return "▶ " + d.data.name;
+        };
+        svgs.selectAll("text")
+            .data(visItems, (d: any) => { return d.data.id; })
+            .text(text);
+
         let newSVGs = svgs.enter().append("svg")
             .attr("class", d => { return "span"; })
             .attr("x", xPosition)
@@ -366,7 +371,7 @@ class Cyclotron {
             .style("fill", d => { return color(this.spanEnd(d.data) - d.data.start);})
 
         let newText = newSVGs.append("text")
-            .text(d => { return d.data.name; })
+            .text(text)
             .attr("x", 5)
             .attr("y", 15)
             .attr("class", "span-text")
