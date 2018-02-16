@@ -82,11 +82,11 @@ class Cyclotron {
         var windowHeight = window.innerHeight - 10;
 
         let leftPadding = 100;
-        let mainHeight = windowHeight * 0.85;
+        let mainHeight = windowHeight * 0.90;
         this.layoutMainHeight = mainHeight;
         let mainWidth = windowWidth - leftPadding;
         this.layoutMainWidth = mainWidth;
-        let miniHeight = windowHeight * 0.1;
+        let miniHeight = windowHeight * 0.05;
         this.layoutScrubberHeight = miniHeight;
         let timeHeight = windowHeight * 0.05;
         this.queuedRedraw = false;
@@ -449,34 +449,26 @@ class Cyclotron {
 
         this.scaleX.domain([0, this.spanManager.maxTime]);
 
-        // Compute the layout.
-        let map = {};
-        let index = -1;
-        let hierarchy = this.nodes();
-        hierarchy.eachBefore(n => {
-            map[n.data.id] = {
-                rowIdx: ++index
-            }
-        })
-
-        let count: number = hierarchy.descendants().length;
+        let threads = Object.keys(this.spanManager.threads)
+            .sort()
+            .map(k => this.spanManager.spans[this.spanManager.threads[k].id]);
 
         // In the scrubber we always show everything expanded (for now).
         var yScaleMini = d3.scaleLinear()
-            .domain([0, count])
+            .domain([0, threads.length])
             .range([0, this.layoutScrubberHeight]);
 
         let minis = this.scrubberPanel.selectAll(".miniItems")
-            .data(hierarchy.descendants(), d => { return d.data.id; })
-            .attr("x", d => { return this.scaleX(d.data.start); })
-            .attr("y", d => { return yScaleMini(map[d.data.id].rowIdx) - 5; })
-            .attr("width", d => this.scaleX(this.spanEnd(d.data) - d.data.start));
+            .data(threads, d => { return d.id; })
+            .attr("x", d => { return this.scaleX(d.start); })
+            .attr("y", (d, i) => { return yScaleMini(i) - 5; })
+            .attr("width", d => this.scaleX(this.spanEnd(d) - d.start));
 
         minis.enter().append("rect")
             .attr("class", d => { return "miniItems" })
-            .attr("x", d => { return this.scaleX(d.data.start); })
-            .attr("y", n => { return yScaleMini(map[n.data.id].rowIdx) - 5; })
-            .attr("width", d => this.scaleX(this.spanEnd(d.data) - d.data.start))
+            .attr("x", d => { return this.scaleX(d.start); })
+            .attr("y", (d, i) => { return yScaleMini(i) - 5; })
+            .attr("width", d => this.scaleX(this.spanEnd(d) - d.start))
             .attr("height", 1);
 
         minis.exit().remove();
