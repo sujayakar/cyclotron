@@ -106,6 +106,17 @@ class Cyclotron {
             .append("rect")
             .attr("width", windowWidth)
             .attr("height", mainHeight);
+        let marker = this.svgChart.append("marker")
+            .attr("id", "triangle")
+            .attr("viewBox", "0 0 10 10")
+            .attr("refX", 0)
+            .attr("refY", 5)
+            .attr("markerUnits", "strokeWidth")
+            .attr("markerWidth", 4)
+            .attr("markerHeight", 3)
+            .attr("orient", "auto");
+        marker.append("path")
+            .attr("d", "M 0 0 L 10 5 L 0 10 z");
 
         // Create the scrubber on the main panel, too.
         //
@@ -360,6 +371,44 @@ class Cyclotron {
             .style("opacity", 1.0);
 
         svgs.exit().remove();
+
+        // Okay, now draw the arrows
+        let toDraw = this.spanManager.wakeups.filter(w => {
+            if (!w.end_ts) {
+                return false;
+            }
+            if (!heightMap[w.waking_id] || !heightMap[w.parked_id]) {
+                return false;
+            }
+            if (w.start_ts < scrubberDomain[0] || w.end_ts > scrubberDomain[1]) {
+                return false;
+            }
+            return true;
+        });
+        let wakeups = this.mainPanel.selectAll("line")
+            .data(toDraw, (d) => { return d.id })
+            .attr("x1", (d) => { return x1(d.start_ts) })
+            .attr("y1", (d) => { return yScale(heightMap[d.waking_id]) })
+            .attr("x2", (d) => { return x1(d.end_ts) })
+            .attr("y2", (d) => { return yScale(heightMap[d.parked_id]) })
+            .attr("marker-end", "url(#triangle)")
+            .style("opacity", 0.75)
+            .style("stroke", "rgb(255,0,0)")
+            .style("stroke-width", "5");
+
+        wakeups.enter().append("line")
+            .data(toDraw, (d) => { return d.id })
+            .attr("x1", (d) => { return x1(d.start_ts) })
+            .attr("y1", (d) => { return yScale(heightMap[d.waking_id]) })
+            .attr("x2", (d) => { return x1(d.end_ts) })
+            .attr("y2", (d) => { return yScale(heightMap[d.parked_id]) })
+            .attr("marker-end", "url(#triangle)")
+            .style("opacity", 0.75)
+            .style("stroke", "rgb(255,0,0)")
+            .style("stroke-width", "5");
+
+        wakeups.exit().remove();
+
     }
 
     private spanEnd(span) {
@@ -396,39 +445,6 @@ class Cyclotron {
         heightMap["index"] = index;
         return heightMap;
     }
-
-    // private drawWakeups() {
-    //     // Okay, now draw the arrows
-    //     let toDraw = this.spanManager.wakeups.filter(w => {
-    //         if (!map[w.waking_id] || !map[w.parked_id]) {
-    //             return false;
-    //         }
-    //         if (w.ts < scrubberDomain[0] || w.ts > scrubberDomain[1]) {
-    //             return false;
-    //         }
-    //         return true;
-    //     });
-    //     console.log(`Found ${toDraw.length} arrows`);
-    //     let wakeups = this.mainPanel.selectAll("line")
-    //         .data(toDraw, (d) => { return d.id })
-    //         .attr("x1", (d) => { return x1(d.ts) })
-    //         .attr("y1", (d) => { return yScale(map[d.waking_id]) })
-    //         .attr("x2", (d) => { return x1(d.ts) + 5 })
-    //         .attr("y2", (d) => { return yScale(map[d.waking_id]) + 5 })
-    //         .style("stroke", "rgb(255,0,0)")
-    //         .style("stroke-width", "2");
-
-    //     wakeups.enter().append("line")
-    //         .data(toDraw, (d) => { return d.id })
-    //         .attr("x1", (d) => { return x1(d.ts) })
-    //         .attr("y1", (d) => { return yScale(map[d.waking_id]) })
-    //         .attr("x2", (d) => { return x1(d.ts) + 5 })
-    //         .attr("y2", (d) => { return yScale(map[d.parked_id]) })
-    //         .style("stroke", "rgb(255,0,0)")
-    //         .style("stroke-width", "1");
-
-    //     wakeups.exit().remove();
-    // }
 
     private drawScrubber() {
         // Make sure the scrubber's position is reflected.
@@ -480,10 +496,16 @@ function test_events() {
         {AsyncStart: {name: "Downloader", parent_id: 0, id: 2, ts: 0.20}},
         {AsyncStart: {name: "PreLocal", parent_id: 0, id: 3, ts: 265}},
         {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 4, ts: 300}},
+        {Wakeup: {id: 100, waking_span: 3, parked_span: 4, ts: 310}},
+        {AsyncOnCPU: {id: 4, ts: 320}},
+        {AsyncOffCPU: {id: 4, ts: 330}},
         {AsyncEnd: {id: 3, ts: 420, outcome: "Success"}},
         {AsyncEnd: {id: 4, ts: 530, outcome: "Success"}},
         {AsyncStart: {name: "DownloadBlock", parent_id: 2, id: 5, ts: 550}},
         {AsyncStart: {name: "RemoteAdd(/foo)", parent_id: 1, id: 6, ts: 580}},
+        {Wakeup: {id: 101, waking_span: 3, parked_span: 6, ts: 330}},
+        {AsyncOnCPU: {id: 6, ts: 600}},
+        {AsyncOffCPU: {id: 6, ts: 605}},
         {AsyncEnd: {id: 6, ts: 615, outcome: "Success"}},
         {AsyncStart: {name: "RemoteAdd(/bar)", parent_id: 1, id: 7, ts: 620}},
         {AsyncEnd: {id: 5, ts: 700, outcome: "Success"}},

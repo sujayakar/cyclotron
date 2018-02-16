@@ -151,7 +151,8 @@ class Root {
 }
 
 class Wakeup {
-    constructor(public id, public waking_id, public parked_id, public ts) {}
+    public end_ts;
+    constructor(public id, public waking_id, public parked_id, public start_ts) {}
 }
 
 
@@ -161,10 +162,14 @@ class SpanManager {
     public maxTime;
     public wakeups;
 
+    private openWakeups;
+
     constructor() {
         this.spans = {};
         this.threads = {};
         this.wakeups = [];
+        // Maps from a waking Span id to the wakeup. These are removed when `AsyncOnCPU` events arrive.
+        this.openWakeups = {};
         this.maxTime = 0;
     }
 
@@ -225,6 +230,14 @@ class SpanManager {
             this.spanStart(event.AsyncStart);
         } else if (event.AsyncOnCPU) {
             let span = this.getSpan(event.AsyncOnCPU.id);
+            // Close any outstanding Wakeups.
+            let wakeups = this.openWakeups[event.AsyncOnCPU.id];
+            if (wakeups) {
+                for (let w of wakeups) {
+                    w.end_ts = this.convertTs(event.AsyncOnCPU.ts)
+                }
+            }
+            delete this.openWakeups[event.AsyncOnCPU.id];
             span.onCPU(this.convertTs(event.AsyncOnCPU.ts));
         } else if (event.AsyncOffCPU) {
             let span = this.getSpan(event.AsyncOffCPU.id);
@@ -263,12 +276,20 @@ class SpanManager {
             let span = this.getSpan(event.ThreadEnd.id);
             span.close(this.convertTs(event.ThreadEnd.ts));
         } else if (event.Wakeup) {
+            if (event.Wakeup.parked_span == event.Wakeup.waking_span) {
+                // We don't track self-wakeups.
+                return;
+            }
             let wakeup = new Wakeup(
                 this.wakeups.length,
-                event.Wakeup.parked_span,
                 event.Wakeup.waking_span,
+                event.Wakeup.parked_span,
                 this.convertTs(event.Wakeup.ts),
             );
+            if (!(event.Wakeup.parked_span in this.openWakeups)) {
+                this.openWakeups[event.Wakeup.parked_span] = [];
+            }
+            this.openWakeups[event.Wakeup.parked_span].push(wakeup);
             this.wakeups.push(wakeup);
         } else {
             throw new Error("Unexpected event: " + event);
