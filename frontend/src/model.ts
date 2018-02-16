@@ -33,6 +33,7 @@ class Span {
         readonly name: string,
         readonly id: number,
         readonly parent_id: number,
+        readonly parent_ix: number,
         readonly start: number,
         readonly metadata,
         readonly threadName
@@ -274,6 +275,7 @@ class SpanManager {
             start.name,
             start.id,
             start.parent_id,
+            parent.children.length,
             this.convertTs(start.ts),
             start.metadata,
             parent.threadName,
@@ -343,6 +345,7 @@ class SpanManager {
                 start.name,
                 start.id,
                 null, // No parent on threads
+                null,
                 this.convertTs(start.ts),
                 null, // No metadata on threads
                 start.name,

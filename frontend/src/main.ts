@@ -268,8 +268,8 @@ class Cyclotron {
         let heightMap = this.computeHeights(hierarchy, this.scrubberStartTs(), this.scrubberEndTs());
         let index = heightMap["index"];
 
-        var x1 = d3.scaleLinear().range([0, this.layoutMainWidth]);
-        x1.domain([this.scrubberStartTs(), this.scrubberEndTs()]);
+        var screenX = d3.scaleLinear().range([0, this.layoutMainWidth]);
+        screenX.domain([this.scrubberStartTs(), this.scrubberEndTs()]);
 
         // This scales all the spans to share the vertical space when they're fully expanded.
         //
@@ -290,19 +290,25 @@ class Cyclotron {
         };
 
         let xPosition = d => {
-            let start = x1(d.data.start);
+            let start = screenX(d.data.start);
             if (start < 0) {
                 start = 0;
             }
             return start;
         };
-        let yPosition = d => { return yScale(heightMap[d.data.id]); };
+        let yPosition = d => {
+            let r = yScale(heightMap[d.data.id]);
+            if (Number.isNaN(r)) {
+                debugger;
+            }
+            return r;
+        };
         let computeWidth = d => {
-            let start = x1(d.data.start);
+            let start = screenX(d.data.start);
             if (start < 0) {
                 start = 0;
             }
-            let end = x1(this.spanEnd(d.data));
+            let end = screenX(this.spanEnd(d.data));
             if (end > this.layoutMainWidth) {
                 end = this.layoutMainWidth;
             }
@@ -385,22 +391,34 @@ class Cyclotron {
             }
             return true;
         });
-        let wakeups = this.mainPanel.selectAll("line")
+
+        let computeLine = (d) => {
+            let x1 = screenX(d.start_ts);
+            let y1 = yScale(heightMap[d.waking_id]);
+            let x2 = screenX(d.end_ts);
+            let y2 = yScale(heightMap[d.parked_id]);
+
+            // Compute the Bezier control points
+            let cX1 = x1;
+            let cY1 = 0.8 * y1 + 0.2 * y2;
+            let cX2 = x1;
+            let cY2 = y2
+
+            return `M ${x1} ${y1} C ${cX1} ${cY1}, ${cX2} ${cY2}, ${x2} ${y2}`;
+        };
+
+        let wakeups = this.mainPanel.selectAll("path")
             .data(toDraw, (d) => { return d.id })
             .attr("class", "wakeup-line")
-            .attr("x1", (d) => { return x1(d.start_ts) })
-            .attr("y1", (d) => { return yScale(heightMap[d.waking_id]) })
-            .attr("x2", (d) => { return x1(d.end_ts) })
-            .attr("y2", (d) => { return yScale(heightMap[d.parked_id]) })
+            .attr("fill-opacity", "0")
+            .attr("d", computeLine)
             .attr("marker-end", "url(#triangle)");
 
-        wakeups.enter().append("line")
+        wakeups.enter().append("path")
             .data(toDraw, (d) => { return d.id })
             .attr("class", "wakeup-line")
-            .attr("x1", (d) => { return x1(d.start_ts) })
-            .attr("y1", (d) => { return yScale(heightMap[d.waking_id]) })
-            .attr("x2", (d) => { return x1(d.end_ts) })
-            .attr("y2", (d) => { return yScale(heightMap[d.parked_id]) })
+            .attr("fill-opacity", "0")
+            .attr("d", computeLine)
             .attr("marker-end", "url(#triangle)");
 
         wakeups.exit().remove();
@@ -413,19 +431,40 @@ class Cyclotron {
 
     private computeHeights(hierarchy, startTs, endTs) {
         var heightMap = {};
-        var index = -1;
+        var nextFree = 0;
         var node = hierarchy, stack = [hierarchy], children, i;
-        var prev = null;
 
         while (node = stack.pop()) {
             let span = node.data;
+
             if (span.intersects(startTs, endTs)) {
-                if (prev && prev.mergeable(span)) {
-                    heightMap[span.id] = index;
+                var height;
+                let startNext = nextFree;
+                if (span.parent_id && span.parent_ix > 0) {
+                    let parent = this.spanManager.spans[span.parent_id];
+                    let prevSpan = parent.children[span.parent_ix - 1];
+                    if (prevSpan.mergeable(span)) {
+                        let prevHeight = heightMap[prevSpan.id];
+                        if (prevHeight === undefined) {
+                            height = nextFree;
+                            nextFree++;
+                        } else {
+                            height = prevHeight;
+                        }
+                    } else {
+                        height = nextFree;
+                        nextFree++;
+                    }
                 } else {
-                    heightMap[span.id] = ++index;
+                    height = nextFree;
+                    nextFree++;
                 }
-                prev = span;
+
+                if (height < nextFree) {
+                    nextFree = height + 1;
+                }
+
+                heightMap[span.id] = height;
             }
 
             children = node.children;
@@ -433,12 +472,7 @@ class Cyclotron {
                 stack.push(children[i])
             }
         }
-
-        if (index < 0) {
-            index = 0;
-        }
-
-        heightMap["index"] = index;
+        heightMap["index"] = nextFree;
         return heightMap;
     }
 
