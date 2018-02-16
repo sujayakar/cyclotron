@@ -387,25 +387,21 @@ class Cyclotron {
         });
         let wakeups = this.mainPanel.selectAll("line")
             .data(toDraw, (d) => { return d.id })
+            .attr("class", "wakeup-line")
             .attr("x1", (d) => { return x1(d.start_ts) })
             .attr("y1", (d) => { return yScale(heightMap[d.waking_id]) })
             .attr("x2", (d) => { return x1(d.end_ts) })
             .attr("y2", (d) => { return yScale(heightMap[d.parked_id]) })
-            .attr("marker-end", "url(#triangle)")
-            .style("opacity", 0.75)
-            .style("stroke", "rgb(255,0,0)")
-            .style("stroke-width", "5");
+            .attr("marker-end", "url(#triangle)");
 
         wakeups.enter().append("line")
             .data(toDraw, (d) => { return d.id })
+            .attr("class", "wakeup-line")
             .attr("x1", (d) => { return x1(d.start_ts) })
             .attr("y1", (d) => { return yScale(heightMap[d.waking_id]) })
             .attr("x2", (d) => { return x1(d.end_ts) })
             .attr("y2", (d) => { return yScale(heightMap[d.parked_id]) })
-            .attr("marker-end", "url(#triangle)")
-            .style("opacity", 0.75)
-            .style("stroke", "rgb(255,0,0)")
-            .style("stroke-width", "5");
+            .attr("marker-end", "url(#triangle)");
 
         wakeups.exit().remove();
 
