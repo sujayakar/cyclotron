@@ -399,9 +399,9 @@ class Cyclotron {
 
         let computeLine = (d) => {
             let x1 = screenX(d.start_ts);
-            let y1 = yScale(heightMap[d.waking_id]);
+            let y1 = yScale(heightMap[d.waking_id]) + computeHeight(d) / 2.0;
             let x2 = screenX(d.end_ts);
-            let y2 = yScale(heightMap[d.parked_id]);
+            let y2 = yScale(heightMap[d.parked_id]) + + computeHeight(d) / 2.0;
 
             // Compute the Bezier control points
             let cX1 = x1;
