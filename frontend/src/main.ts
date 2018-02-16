@@ -28,32 +28,32 @@ class Cyclotron {
 
         let zoomIn = () => {
             let zoomWidth = this.scrubberEnd - this.scrubberStart;
-            this.scrubberStart = this.scrubberStart + zoomWidth * 0.05;
-            this.scrubberEnd = this.scrubberEnd - zoomWidth * 0.05;
+            this.scrubberStart = d3.max([this.scrubberStart + zoomWidth * 0.05, 0]);
+            this.scrubberEnd = d3.min([this.scrubberEnd - zoomWidth * 0.05, this.layoutMainWidth]);
             this.drawMain();
         };
         let zoomOut = () => {
             let zoomWidth = this.scrubberEnd - this.scrubberStart;
-            this.scrubberStart = this.scrubberStart - zoomWidth * 0.05;
-            this.scrubberEnd = this.scrubberEnd + zoomWidth * 0.05;
+            this.scrubberStart = d3.max([this.scrubberStart - zoomWidth * 0.05, 0]);
+            this.scrubberEnd = d3.min([this.scrubberEnd + zoomWidth * 0.05, this.layoutMainWidth]);
             this.drawMain();
         };
         let panLeft = () => {
             let zoomWidth = this.scrubberEnd - this.scrubberStart;
-            this.scrubberStart = this.scrubberStart - zoomWidth * 0.05;
-            this.scrubberEnd = this.scrubberEnd - zoomWidth * 0.05;
+            this.scrubberStart = d3.max([this.scrubberStart - zoomWidth * 0.05, 0])
+            this.scrubberEnd = d3.min([this.scrubberEnd - zoomWidth * 0.05, this.layoutMainWidth]);
             this.drawMain();
         };
         let panRight = () => {
             let zoomWidth = this.scrubberEnd - this.scrubberStart;
-            this.scrubberStart = this.scrubberStart + zoomWidth * 0.05;
-            this.scrubberEnd = this.scrubberEnd + zoomWidth * 0.05;
+            this.scrubberStart = d3.max([this.scrubberStart + zoomWidth * 0.05, 0]);
+            this.scrubberEnd = d3.min([this.scrubberEnd + zoomWidth * 0.05, this.layoutMainWidth]);
             this.drawMain();
         }
 
         d3.select("body")
             .on("keydown", () => {
-                if (!this.scrubberStart) return;
+                if (this.scrubberStart === undefined) return;
                 if (d3.event.keyCode == 87) { // W
                     zoomIn();
                 } else if (d3.event.keyCode == 83) { // S
@@ -65,7 +65,7 @@ class Cyclotron {
                 }
             })
             .on("wheel.zoom", () => {
-                if (!this.scrubberStart) return;
+                if (this.scrubberStart === undefined) return;
                 if (d3.event.wheelDeltaY > 0) {
                     zoomIn();
                 } else if (d3.event.wheelDeltaY < 0) {
