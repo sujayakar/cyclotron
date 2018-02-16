@@ -350,6 +350,8 @@ class Cyclotron {
         };
         svgs.selectAll("text")
             .data(visItems, (d: any) => { return d.data.id; })
+            .style("font-size", d => computeHeight(d) * 0.8)
+            .attr("y", d => computeHeight(d) * 0.8)
             .text(text);
 
         let newSVGs = svgs.enter().append("svg")
@@ -373,7 +375,8 @@ class Cyclotron {
         let newText = newSVGs.append("text")
             .text(text)
             .attr("x", 5)
-            .attr("y", 15)
+            .style("font-size", d => computeHeight(d) * 0.8)
+            .attr("y", d => computeHeight(d) * 0.8)
             .attr("class", "span-text")
             .attr("text-anchor", "start");
 
