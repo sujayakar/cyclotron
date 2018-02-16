@@ -100,12 +100,26 @@ class Cyclotron {
             .attr("width", windowWidth)
             .attr("height", windowHeight)
             .attr("class", "chart");
-        this.svgChart.append("defs")
-            .append("clipPath")
+        const defs = this.svgChart.append("defs");
+        defs.append("clipPath")
             .attr("id", "clip")
             .append("rect")
             .attr("width", windowWidth)
             .attr("height", mainHeight);
+        defs.append("pattern")
+            .attr("id", "pinstripe")
+            .attr("patternUnits", "userSpaceOnUse")
+            .attr("width", 60)
+            .attr("height", 1)
+            .attr("patternTransform", "rotate(90)")
+            .append("line")
+            .attr("x1", 0)
+            .attr("y1", 0)
+            .attr("x2", 30)
+            .attr("y2", 0)
+            .attr("stroke", "lightgrey")
+            .attr("stroke-width", 3);
+
         let marker = this.svgChart.append("marker")
             .attr("id", "triangle")
             .attr("viewBox", "0 0 10 10")
@@ -117,6 +131,16 @@ class Cyclotron {
             .attr("orient", "auto");
         marker.append("path")
             .attr("d", "M 0 0 L 10 5 L 0 10 z");
+
+        let axisHeight = 20;
+
+        // Add in the stripe background.
+        this.svgChart.append("rect")
+            .attr("id", "pinstripe-rect")
+            .attr("transform", "translate(" + leftPadding + "," + axisHeight + ")")
+            .attr("width", "100%")
+            .attr("height", this.layoutMainHeight - axisHeight)
+            .attr("fill", "url(#pinstripe)");
 
         // Create the scrubber on the main panel, too.
         //
@@ -154,7 +178,7 @@ class Cyclotron {
             .attr("class", "brush")
             .call(mainScrubber);
 
-        let axisHeight = 20;
+
         this.topAxis = this.svgChart.append("g")
             .attr("transform", "translate(" + leftPadding + "," + 0 + ")")
             .attr("width", windowWidth)
@@ -167,6 +191,7 @@ class Cyclotron {
             .attr("height", mainHeight)
             .attr("class", "main")
             .attr("clip-path", "url(#clip)");
+
         this.scrubberPanel = this.svgChart.append("g")
             .attr("transform", "translate(" + leftPadding + "," + mainHeight + ")")
             .attr("width", windowWidth)
@@ -283,6 +308,17 @@ class Cyclotron {
             .domain([0, index])
             .range([0, viewHeight]);
 
+        // Resize the stripes.
+        d3.select("#pinstripe")
+            .attr("width", yScale(2));
+        d3.select("#pinstripe-rect")
+            .transition()
+            .duration(100)
+            .attr("height", yScale(1) * (index + 1));
+        d3.select("#pinstripe")
+            .select("line")
+            .attr("x2", yScale(1));
+
         let clickHandler = node => { // we should set this up once at the beginning
             console.log("got clicked: " + node.data.name);
             node.data.expanded = !node.data.expanded;
@@ -296,7 +332,7 @@ class Cyclotron {
             }
             return start;
         };
-        let yPosition = d => { return yScale(heightMap[d.data.id]) };
+        let yPosition = d => { return yScale(heightMap[d.data.id]) + 0.10 * yScale(1) };
         let computeWidth = d => {
             let start = screenX(d.data.start);
             if (start < 0) {
@@ -308,7 +344,7 @@ class Cyclotron {
             }
             return end - start;
         };
-        let computeHeight = d => { return .95 * yScale(1); };
+        let computeHeight = d => { return .80 * yScale(1); };
 
         // For already-visible spans, make sure they're positioned appropriately.
         //
@@ -368,6 +404,8 @@ class Cyclotron {
         let newRects = newSVGs.append("rect")
             .attr("width", computeWidth)
             .attr("height", computeHeight)
+            .attr("rx", 6)
+            .attr("ry", 6)
             .on("click", clickHandler)
             .style("opacity", 0.7)
             .style("fill", d => { return color(this.spanEnd(d.data) - d.data.start);})
