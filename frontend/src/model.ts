@@ -146,13 +146,74 @@ class Root {
     public getChildren(force) {
         return Object.keys(this.manager.threads)
             .sort()
-            .map(k => this.manager.spans[this.manager.threads[k]]);
+            .map(k => this.manager.spans[this.manager.threads[k].id]);
     }
 }
 
 class Wakeup {
     public end_ts;
     constructor(public id, public waking_id, public parked_id, public start_ts) {}
+}
+
+
+class Thread {
+    public counts;
+    public timestamps;
+    public maxCount;
+
+    constructor(public id) {
+        this.timestamps = [];
+        this.counts = [];
+        this.maxCount = 0;
+    }
+
+    public maxTime() {
+        if (this.timestamps.length > 0) {
+            return this.timestamps[this.timestamps.length - 1];
+        }
+        return 0;
+    }
+
+    public logActivity(ts) {
+        let msInt = Math.floor(ts * 1e3);
+
+        if (this.timestamps.length > 0) {
+            let last = this.timestamps[this.timestamps.length - 1];
+            if (last > msInt) {
+                throw new Error("Going back in time for " + this.id);
+            }
+            if (last === msInt) {
+                let newCount = this.counts[this.counts.length - 1] + 1;
+                this.counts[this.counts.length - 1] = newCount;
+                if (newCount > this.maxCount) {
+                    this.maxCount = newCount;
+                }
+                return;
+            }
+        }
+
+        if (this.maxCount < 1) {
+            this.maxCount = 1;
+        }
+        this.timestamps.push(msInt);
+        this.counts.push(1);
+    }
+
+    public drawActivity(ctx) {
+        if (this.timestamps.length === 0) {
+            return;
+        }
+
+        ctx.fillStyle = "green";
+        ctx.clearRect(0, 0, this.timestamps[this.timestamps.length - 1], 1);
+
+        let cur_ms = -1;
+        this.timestamps.forEach((ts, i) => {
+            let count = this.counts[i];
+
+            ctx.fillRect(ts, 0, 1, 1);
+        });
+    }
 }
 
 
@@ -174,7 +235,7 @@ class SpanManager {
     }
 
     public getThread(name) {
-        return this.spans[this.threads[name]];
+        return this.spans[this.threads[name].id];
     }
 
     private getSpan(id) {
@@ -202,6 +263,11 @@ class SpanManager {
         return ts;
     }
 
+    private logActivity(span, ts) {
+        let thread = this.threads[span.threadName];
+        thread.logActivity(ts);
+    }
+
     private spanStart(start) {
         let parent = this.getSpan(start.parent_id);
         let span = new Span(
@@ -227,7 +293,9 @@ class SpanManager {
 
     public addEvent(event) {
         if (event.AsyncStart) {
-            this.spanStart(event.AsyncStart);
+            let span = this.spanStart(event.AsyncStart);
+            let ts = this.convertTs(event.AsyncStart.ts);
+            this.logActivity(span, ts);
         } else if (event.AsyncOnCPU) {
             let span = this.getSpan(event.AsyncOnCPU.id);
             // Close any outstanding Wakeups.
@@ -238,23 +306,32 @@ class SpanManager {
                 }
             }
             delete this.openWakeups[event.AsyncOnCPU.id];
+            let ts = this.convertTs(event.AsyncOnCPU.ts);
+            this.logActivity(span, ts);
             span.onCPU(this.convertTs(event.AsyncOnCPU.ts));
         } else if (event.AsyncOffCPU) {
             let span = this.getSpan(event.AsyncOffCPU.id);
-            span.offCPU(this.convertTs(event.AsyncOffCPU.ts));
+            let ts = this.convertTs(event.AsyncOffCPU.ts);
+            this.logActivity(span, ts);
+            span.offCPU(ts);
         } else if (event.AsyncEnd) {
             let span = this.getSpan(event.AsyncEnd.id);
-            span.close(this.convertTs(event.AsyncEnd.ts));
+            let ts = this.convertTs(event.AsyncEnd.ts);
+            this.logActivity(span, ts);
+            span.close(ts);
             span.outcome = event.outcome;
         } else if (event.SyncStart) {
             let span = this.spanStart(event.SyncStart);
-            span.onCPU(this.convertTs(event.SyncStart.ts));
+            let ts = this.convertTs(event.SyncStart.ts);
+            this.logActivity(span, ts);
+            span.onCPU(ts);
         } else if (event.SyncEnd) {
             let span = this.getSpan(event.SyncEnd.id);
             if (span.scheduled.length !== 1) {
                 throw new Error("More than one schedule for sync span " + span.id);
             }
             let ts = this.convertTs(event.SyncEnd.ts)
+            this.logActivity(span, ts);
             span.offCPU(ts);
             span.close(ts);
         } else if (event.ThreadStart) {
@@ -271,7 +348,7 @@ class SpanManager {
                 start.name,
             );
             this.addSpan(span);
-            this.threads[start.name] = start.id;
+            this.threads[start.name] = new Thread(start.id);
         } else if (event.ThreadEnd) {
             let span = this.getSpan(event.ThreadEnd.id);
             span.close(this.convertTs(event.ThreadEnd.ts));
