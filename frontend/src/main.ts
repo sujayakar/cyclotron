@@ -285,7 +285,7 @@ class Cyclotron {
         //
         // We might want to use a fixed height here and scroll instead.
         let viewHeight = this.layoutMainHeight - 60;
-        let defaultHeight = 30 * numLanes;
+        let defaultHeight = 25 * numLanes;
         if (defaultHeight < viewHeight) {
             viewHeight = defaultHeight;
         }
