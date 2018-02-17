@@ -75,16 +75,12 @@ class Cyclotron {
 
         this.spanManager = new SpanManager();
 
-        const SPAN_HEIGHT = 80;
-        const MINI_SPAN_HEIGHT = 12;
+        var windowWidth = document.body.clientWidth;
+        var windowHeight = document.documentElement.clientHeight - 20; // Some buffer to ensure no scroll.
 
-        var windowWidth = window.innerWidth - 10;
-        var windowHeight = window.innerHeight - 10;
-
-        let leftPadding = 100;
         let mainHeight = windowHeight * 0.90;
         this.layoutMainHeight = mainHeight;
-        let mainWidth = windowWidth - leftPadding;
+        let mainWidth = windowWidth;
         this.layoutMainWidth = mainWidth;
         let miniHeight = windowHeight * 0.05;
         this.layoutScrubberHeight = miniHeight;
@@ -137,7 +133,7 @@ class Cyclotron {
         // Add in the stripe background.
         this.svgChart.append("rect")
             .attr("id", "pinstripe-rect")
-            .attr("transform", "translate(" + leftPadding + "," + axisHeight + ")")
+            .attr("transform", "translate(0," + axisHeight + ")")
             .attr("width", "100%")
             .attr("height", this.layoutMainHeight - axisHeight)
             .attr("fill", "url(#pinstripe)");
@@ -173,27 +169,26 @@ class Cyclotron {
                 mainScrubber.move(d3.select("#main-brush"), null);
             });
         this.svgChart.append("g")
-            .attr("transform", "translate(" + leftPadding + ",0)")
+            // .attr("transform", "translate(" + leftPadding + ",0)")
             .attr("id", "main-brush")
             .attr("class", "brush")
             .call(mainScrubber);
 
 
         this.topAxis = this.svgChart.append("g")
-            .attr("transform", "translate(" + leftPadding + "," + 0 + ")")
             .attr("width", windowWidth)
             .attr("height", mainHeight)
             .attr("class", "top-axis")
             .append("g");
         this.mainPanel = this.svgChart.append("g")
-            .attr("transform", "translate(" + leftPadding + "," + axisHeight + ")")
+            .attr("transform", "translate(0," + axisHeight + ")")
             .attr("width", windowWidth)
             .attr("height", mainHeight)
             .attr("class", "main")
             .attr("clip-path", "url(#clip)");
 
         this.scrubberPanel = this.svgChart.append("g")
-            .attr("transform", "translate(" + leftPadding + "," + mainHeight + ")")
+            .attr("transform", "translate(0," + mainHeight + ")")
             .attr("width", windowWidth)
             .attr("height", miniHeight)
             .attr("class", "mini");
