@@ -143,7 +143,7 @@ class Cyclotron {
         // This comes before the other rects which means it appears "behind" when rendering,
         // so we should probably bump it to the top once it starts?
         let mainScrubber = d3.brushX()
-            .extent([[0, 0], [this.layoutMainWidth, this.layoutMainHeight]])
+            .extent([[0, 0], [this.layoutMainWidth, this.layoutMainHeight - axisHeight]])
             .on("end", () => {
                 if (!d3.event.selection) {
                     // This is fired after we clear below (i.e. recursively), so we should just return.
@@ -169,7 +169,6 @@ class Cyclotron {
                 mainScrubber.move(d3.select("#main-brush"), null);
             });
         this.svgChart.append("g")
-            // .attr("transform", "translate(" + leftPadding + ",0)")
             .attr("id", "main-brush")
             .attr("class", "brush")
             .call(mainScrubber);
@@ -177,7 +176,6 @@ class Cyclotron {
 
         this.topAxis = this.svgChart.append("g")
             .attr("width", windowWidth)
-            .attr("height", mainHeight)
             .attr("class", "top-axis")
             .append("g");
         this.mainPanel = this.svgChart.append("g")
