@@ -17,6 +17,7 @@ class Cyclotron {
     private scrubberEnd;
 
     private queuedRedraw;
+    private queuedRedrawScrubber;
 
     constructor() {
         // First some global configuration.
@@ -30,25 +31,25 @@ class Cyclotron {
             let zoomWidth = this.scrubberEnd - this.scrubberStart;
             this.scrubberStart = d3.max([this.scrubberStart + zoomWidth * 0.05, 0]);
             this.scrubberEnd = d3.min([this.scrubberEnd - zoomWidth * 0.05, this.layoutMainWidth]);
-            this.drawMain();
+            this.queueRedraw();
         };
         let zoomOut = () => {
             let zoomWidth = this.scrubberEnd - this.scrubberStart;
             this.scrubberStart = d3.max([this.scrubberStart - zoomWidth * 0.05, 0]);
             this.scrubberEnd = d3.min([this.scrubberEnd + zoomWidth * 0.05, this.layoutMainWidth]);
-            this.drawMain();
+            this.queueRedraw();
         };
         let panLeft = () => {
             let zoomWidth = this.scrubberEnd - this.scrubberStart;
             this.scrubberStart = d3.max([this.scrubberStart - zoomWidth * 0.05, 0])
             this.scrubberEnd = d3.min([this.scrubberEnd - zoomWidth * 0.05, this.layoutMainWidth]);
-            this.drawMain();
+            this.queueRedraw();
         };
         let panRight = () => {
             let zoomWidth = this.scrubberEnd - this.scrubberStart;
             this.scrubberStart = d3.max([this.scrubberStart + zoomWidth * 0.05, 0]);
             this.scrubberEnd = d3.min([this.scrubberEnd + zoomWidth * 0.05, this.layoutMainWidth]);
-            this.drawMain();
+            this.queueRedraw();
         }
 
         d3.select("body")
@@ -86,6 +87,7 @@ class Cyclotron {
         this.layoutScrubberHeight = miniHeight;
         let timeHeight = windowHeight * 0.05;
         this.queuedRedraw = false;
+        this.queuedRedrawScrubber = false;
 
         //scales
         this.scaleX = d3.scaleLinear()
@@ -163,7 +165,7 @@ class Cyclotron {
                     .range([this.scrubberStart, this.scrubberEnd]);
                 this.scrubberStart = scale(d3.event.selection[0]);
                 this.scrubberEnd = scale(d3.event.selection[1]);
-                this.drawMain();
+                this.queueRedraw();
 
                 // Hide the scrubber.
                 mainScrubber.move(d3.select("#main-brush"), null);
@@ -197,7 +199,7 @@ class Cyclotron {
                 console.log("BRUSHED");
                 this.scrubberStart = d3.event.selection[0];
                 this.scrubberEnd = d3.event.selection[1];
-                this.drawMain(false); // drawMain redraws the scrubber, but we don't want to do that if we're...from the scrubber
+                this.queueRedraw(false);
             });
         this.scrubberPanel.append("g")
             .attr("id", "bottom-scrubber")
@@ -218,24 +220,22 @@ class Cyclotron {
         // test_events().forEach((e, i) => { setTimeout(() => { this.addEvent(e); }, 0); });
     }
 
-    public queueRedraw() {
+    public queueRedraw(redrawScrubber = true) {
         if (!this.queuedRedraw) {
-            this.queuedRedraw = true;
             setTimeout(() => {
+                let redrawScrubber = this.queuedRedrawScrubber;
                 this.queuedRedraw = false;
-                this.drawMain();
+                this.queuedRedrawScrubber = false;
+                this.drawMain(redrawScrubber);
             }, 16);
+            this.queuedRedraw = true;
         }
+        this.queuedRedrawScrubber = redrawScrubber || this.queuedRedrawScrubber;
     }
 
     public addEvent(event) {
         this.spanManager.addEvent(event);
         this.queueRedraw();
-    }
-
-    private nodes(expanded_only = false) {
-        let root = new Root(this.spanManager);
-        return d3.hierarchy(root, span => span.getChildren(!expanded_only));
     }
 
     private scrubberStartTs() {
@@ -246,13 +246,15 @@ class Cyclotron {
         return this.scaleX.invert(this.scrubberEnd);
     }
 
-    private drawMain(redrawScrubber = true) {
+    private drawMain(redrawScrubber) {
         this.scaleX.domain([0, this.spanManager.maxTime]);
         if (redrawScrubber)
             this.drawScrubber();
 
         // Update the axis at the top.
-        let scrubberDomain = [this.scrubberStartTs(), this.scrubberEndTs()];
+        let startTs = this.scrubberStartTs();
+        let endTs = this.scrubberEndTs();
+        let scrubberDomain = [startTs, endTs];
         let axisScale = d3.scaleLinear()
             .domain(scrubberDomain)
             .range([0, this.layoutMainWidth]);
@@ -274,31 +276,21 @@ class Cyclotron {
             return `${formatTime(scrubberDomain[0], 0)}/${formatTime(delta, 2)}`;
         }));
 
-        let hierarchy = this.nodes(true);
-
-        let visItems = hierarchy.descendants().filter(d => {
-            return d.data.intersects(this.scrubberStartTs(), this.scrubberEndTs());
-        });
-
-        // Compute a new order based on what's visible.
-        let prev = null;
-
-        let heightMap = this.computeHeights(hierarchy, this.scrubberStartTs(), this.scrubberEndTs());
-        let index = heightMap["index"];
-
         var screenX = d3.scaleLinear().range([0, this.layoutMainWidth]);
-        screenX.domain([this.scrubberStartTs(), this.scrubberEndTs()]);
+        screenX.domain([startTs, endTs]);
+
+        let {laneAssignment, visibleSpans, numLanes} = this.computeVisible(startTs, endTs);
 
         // This scales all the spans to share the vertical space when they're fully expanded.
         //
         // We might want to use a fixed height here and scroll instead.
         let viewHeight = this.layoutMainHeight - 60;
-        let defaultHeight = 30 * index;
+        let defaultHeight = 30 * numLanes;
         if (defaultHeight < viewHeight) {
             viewHeight = defaultHeight;
         }
         var yScale = d3.scaleLinear()
-            .domain([0, index])
+            .domain([0, numLanes])
             .range([0, viewHeight]);
 
         // Resize the stripes.
@@ -307,31 +299,32 @@ class Cyclotron {
         d3.select("#pinstripe-rect")
             .transition()
             .duration(100)
-            .attr("height", yScale(1) * (index + 1));
+            .attr("height", yScale(1) * (numLanes + 1));
         d3.select("#pinstripe")
             .select("line")
             .attr("x2", yScale(1));
 
+
         let clickHandler = node => { // we should set this up once at the beginning
-            console.log("got clicked: " + node.data.name);
-            node.data.expanded = !node.data.expanded;
+            console.log("got clicked: " + node.name);
+            node.expanded = !node.expanded;
             this.queueRedraw();
         };
 
         let xPosition = d => {
-            let start = screenX(d.data.start);
+            let start = screenX(d.start);
             if (start < 0) {
                 start = 0;
             }
             return start;
         };
-        let yPosition = d => { return yScale(heightMap[d.data.id]) + 0.10 * yScale(1) };
+        let yPosition = d => { return yScale(laneAssignment[d.id]) + 0.10 * yScale(1) };
         let computeWidth = d => {
-            let start = screenX(d.data.start);
+            let start = screenX(d.start);
             if (start < 0) {
                 start = 0;
             }
-            let end = screenX(this.spanEnd(d.data));
+            let end = screenX(this.spanEnd(d));
             if (end > this.layoutMainWidth) {
                 end = this.layoutMainWidth;
             }
@@ -344,7 +337,7 @@ class Cyclotron {
         // Note that we animate changes on the y-axis, but not on the x-axis. This is so
         // that when you scroll side-to-side, things update immediately.
         let svgs = this.mainPanel.selectAll("svg") // formerly itemRects
-            .data(visItems, (d: any) => { return d.data.id; })
+            .data(visibleSpans, (d: any) => { return d.id; })
             .attr("x", xPosition)
             .attr("width", computeWidth)
             .attr("height", computeHeight);
@@ -372,13 +365,15 @@ class Cyclotron {
 
         // Make sure text shows correctly.
         let text = d =>  {
-            if (d.data.expanded)
-                return "▼ " + d.data.name;
+            if (!d.children.length)
+                return d.name;
+            else if (d.expanded)
+                return "▼ " + d.name;
             else
-                return "▶ " + d.data.name;
+                return "▶ " + d.name;
         };
         svgs.selectAll("text")
-            .data(visItems, (d: any) => { return d.data.id; })
+            .data(visibleSpans, (d: any) => { return d.id; })
             .style("font-size", d => computeHeight(d) * 0.8)
             .attr("y", d => computeHeight(d) * 0.8)
             .text(text);
@@ -401,7 +396,7 @@ class Cyclotron {
             .attr("ry", 6)
             .on("click", clickHandler)
             .style("opacity", 0.7)
-            .style("fill", d => { return color(this.spanEnd(d.data) - d.data.start);})
+            .style("fill", d => { return color(this.spanEnd(d) - d.start);})
 
         let newText = newSVGs.append("text")
             .text(text)
@@ -422,7 +417,7 @@ class Cyclotron {
             if (!w.end_ts) {
                 return false;
             }
-            if (!heightMap[w.waking_id] || !heightMap[w.parked_id]) {
+            if (!laneAssignment[w.waking_id] || !laneAssignment[w.parked_id]) {
                 return false;
             }
             if (w.start_ts < scrubberDomain[0] || w.end_ts > scrubberDomain[1]) {
@@ -433,9 +428,9 @@ class Cyclotron {
 
         let computeLine = (d) => {
             let x1 = screenX(d.start_ts);
-            let y1 = yScale(heightMap[d.waking_id]) + computeHeight(d) / 2.0;
+            let y1 = yScale(laneAssignment[d.waking_id]) + computeHeight(d) / 2.0;
             let x2 = screenX(d.end_ts);
-            let y2 = yScale(heightMap[d.parked_id]) + + computeHeight(d) / 2.0;
+            let y2 = yScale(laneAssignment[d.parked_id]) + + computeHeight(d) / 2.0;
 
             // Compute the Bezier control points
             let cX1 = x1;
@@ -468,51 +463,45 @@ class Cyclotron {
         return span.end || this.spanManager.maxTime;
     }
 
-    private computeHeights(hierarchy, startTs, endTs) {
-        var heightMap = {};
-        var nextFree = 0;
-        var node = hierarchy, stack = [hierarchy], children, i;
+    private computeVisible(startTs, endTs) {
+        let root = new Root(this.spanManager);
+        let stack = root.overlappingChildren(startTs, endTs).reverse();
 
-        while (node = stack.pop()) {
-            let span = node.data;
+        var nextLane = 0;
 
-            if (span.intersects(startTs, endTs)) {
-                var height;
-                let startNext = nextFree;
-                if (span.parent_id && span.parent_ix > 0) {
-                    let parent = this.spanManager.spans[span.parent_id];
-                    let prevSpan = parent.children[span.parent_ix - 1];
-                    if (prevSpan.mergeable(span)) {
-                        let prevHeight = heightMap[prevSpan.id];
-                        if (prevHeight === undefined) {
-                            height = nextFree;
-                            nextFree++;
-                        } else {
-                            height = prevHeight;
-                        }
-                    } else {
-                        height = nextFree;
-                        nextFree++;
+        // lane -> max ts drawn
+        var laneMaxTs = {}
+        var laneAssignment = {};
+        var visible = []
+
+        var span;
+        while (span = stack.pop()) {
+            var lane = null;
+            if (span.parent_id) {
+                let parentLane = laneAssignment[span.parent_id];
+                for (var candidate = parentLane + 1; candidate < nextLane; candidate++) {
+                    let maxTs = laneMaxTs[candidate];
+                    if (maxTs === undefined) {
+                        throw new Error(`Missing max ts for ${lane}`);
                     }
-                } else {
-                    height = nextFree;
-                    nextFree++;
+                    if (maxTs <= span.start) {
+                        lane = candidate;
+                        break;
+                    }
                 }
-
-                if (height < nextFree) {
-                    nextFree = height + 1;
-                }
-
-                heightMap[span.id] = height;
+            }
+            if (lane === null) {
+                lane = nextLane++;
             }
 
-            children = node.children;
-            if (children) for (i = children.length - 1; i >= 0; --i) {
-                stack.push(children[i])
-            }
+            laneMaxTs[lane] = span.end ? span.end : endTs;
+            laneAssignment[span.id] = lane;
+            visible.push(span);
+
+            span.overlappingChildren(startTs, endTs).reverse().forEach(child => { stack.push(child); })
         }
-        heightMap["index"] = nextFree;
-        return heightMap;
+
+        return {laneAssignment, visibleSpans: visible, numLanes: nextLane};
     }
 
     private drawScrubber() {
@@ -526,7 +515,6 @@ class Cyclotron {
             .sort()
             .map(k => this.spanManager.spans[this.spanManager.threads[k].id]);
 
-        // In the scrubber we always show everything expanded (for now).
         var yScaleMini = d3.scaleLinear()
             .domain([0, threads.length])
             .range([0, this.layoutScrubberHeight]);

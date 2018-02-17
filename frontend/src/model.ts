@@ -43,12 +43,20 @@ class Span {
         this.outcome = null;
 
         this.children = [];
-        this.expanded = true;
+        this.expanded = false;
     }
 
     public getChildren(forceExpanded) {
         if (this.expanded || forceExpanded) {
             return this.children;
+        } else {
+            return [];
+        }
+    }
+
+    public overlappingChildren(start, end) {
+        if (this.expanded) {
+            return this.children.filter(span => span.intersects(start, end));
         } else {
             return [];
         }
@@ -70,6 +78,12 @@ class Span {
 
     public intersects(start, end) {
         return this.start < end && (this.end === null || this.end > start);
+    }
+
+    public overlaps(span) {
+        let first  = this.start < span.start ? this : span;
+        let second = this.start < span.start ? span : this;
+        return first.end === null || second.start < first.end;
     }
 
     public close(ts) {
@@ -126,6 +140,10 @@ class Root {
         this.id = "root";
         this.start = 0;
         this.end = manager.maxTime;
+    }
+
+    public overlappingChildren(start, end) {
+        return this.getChildren(null).filter(span => span.intersects(start, end));
     }
 
     public intersects(start, end) {
