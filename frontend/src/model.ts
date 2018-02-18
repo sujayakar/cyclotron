@@ -43,7 +43,7 @@ class Span {
         this.outcome = null;
 
         this.children = [];
-        this.expanded = false;
+        this.expanded = true;
     }
 
     public getChildren(forceExpanded) {
@@ -131,7 +131,7 @@ class Span {
     }
 }
 
-class Root {
+export class Root {
     public id;
     public start;
     public end;
@@ -235,8 +235,7 @@ class Thread {
     }
 }
 
-
-class SpanManager {
+export class SpanManager {
     public spans;
     public threads;
     public maxTime;
@@ -393,28 +392,4 @@ class SpanManager {
             throw new Error("Unexpected event: " + event);
         }
     }
-}
-
-function ws_test() {
-    let spanManager = new SpanManager();
-
-    var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
-    socket.onmessage = function (event) {
-        var msg = JSON.parse(event.data);
-        var received = document.getElementById("received");
-        received.appendChild(document.createElement("br"));
-        received.appendChild(document.createTextNode(event.data));
-        spanManager.addEvent(msg);
-	};
-    socket.onopen = function(event) {
-        socket.send("test.log");
-    };
-    socket.onerror = function(event) {
-        console.log("onerror", event);
-    };
-    socket.onclose = function(event) {
-        console.log("onclose", event);
-    };
-
-    return spanManager;
 }
