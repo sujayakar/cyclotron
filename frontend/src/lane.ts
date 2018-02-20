@@ -1,4 +1,4 @@
-import { Span, SpanManager } from "./model";
+import { Span } from "./model";
 
 export class Lane {
     // Sorted by increasing start time, non-overlapping

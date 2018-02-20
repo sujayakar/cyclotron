@@ -209,7 +209,6 @@ export class SpanManager {
             span.laneID = lane.id;
             span.maxSubtreeLaneID = lane.id;
             this.insertLane(lane);
-            console.log(`Thread ${span.name} => ${lane.index}`);
             return lane;
         }
 
@@ -230,7 +229,6 @@ export class SpanManager {
 
             if (candidates.length > 0) {
                 candidates.sort();
-                console.log(`Match for ${span.name} => ${candidates[0]}`);
                 let lane = this.lanes[this.laneByIndex[candidates[0]]];
                 if (!lane.push(span)) {
                     throw new Error(`Overlap on free lane?`);
@@ -245,7 +243,6 @@ export class SpanManager {
         }
 
         let maxLane = this.lanes[parent.maxSubtreeLaneID];
-        console.log(`Inserting at ${maxLane.index + 1}`);
         let lane = new Lane(this.nextLaneID++, maxLane.index + 1, span);
         span.laneID = lane.id;
         span.maxSubtreeLaneID = lane.id;

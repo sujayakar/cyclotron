@@ -24,7 +24,7 @@ export class Cyclotron {
         this.windowWidth = window.innerWidth * 0.9;
         this.windowHeight = window.innerHeight * 0.9;
 
-        this.app.renderer.backgroundColor = 0x061639;
+        this.app.renderer.backgroundColor = 0xfafafa;
         this.app.renderer.view.style.className = "viewport";
         this.app.renderer.autoResize = true;
         this.app.renderer.resize(this.windowWidth, this.windowHeight);
@@ -35,10 +35,6 @@ export class Cyclotron {
         var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
         this.bufferedMessages = [];
         socket.onmessage = event => {
-            // this.bufferedMessages.push(JSON.parse(event.data));
-            // if (i++ > 1000) {
-            //     return;
-            // }
             this.addEvent(JSON.parse(event.data));
         };
         socket.onopen = event => { socket.send("empty_file_release.log"); };
@@ -96,7 +92,7 @@ export class Cyclotron {
                 if (container === undefined) {
                     container = new PIXI.Container();
                     let rect = new PIXI.Graphics();
-                    rect.beginFill(0x66CCFF)
+                    rect.beginFill(0x484848)
                     rect.drawRect(
                         0,
                         0,
@@ -106,7 +102,8 @@ export class Cyclotron {
                     rect.endFill();
                     container.addChild(rect);
 
-                    let name = new PIXI.Text(span.name);
+                    let style = new PIXI.TextStyle({fill: "white"});
+                    let name = new PIXI.Text(span.name, style);
                     name.width = end - span.start;
                     name.height = 0.9;
                     container.addChild(name);
@@ -118,17 +115,6 @@ export class Cyclotron {
                 let rect = container.children[0];
                 rect.width = end - span.start;
                 rect.height = 0.9;
-
-                // console.log(`Rect ${span.name}: ${container.children[0].width} x ${container.children[0].height}`)
-                // console.log(`Text ${span.name}: ${container.children[1].width} x ${container.children[1].height}`)
-                // let rect = container.children[0];
-                // rect.beginFill(0x66CCFF);
-                // rect.drawRect(0, 0, end - span.start, 0.9);
-                // rect.endFill();
-                // rect.width = end - span.start;
-                // rect.height = 1;
-
-                // console.log(`${span.name} -> (${span.start}, ${lane.index}, ${end - span.start}, 0.9)`);
 
                 container.x = span.start;
                 container.y = lane.index;
