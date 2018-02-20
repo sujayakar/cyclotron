@@ -1,6 +1,6 @@
 import PIXI = require("pixi.js");
 import Viewport = require("pixi-viewport");
-import { SpanManager, Root } from "./model";
+import { SpanManager } from "./model";
 
 export class Cyclotron {
     private spanManager;
@@ -12,6 +12,7 @@ export class Cyclotron {
     private ticker;
     private dirty;
     private timeline;
+    private bufferedMessages;
 
     constructor() {
         this.app = new PIXI.Application({
@@ -32,7 +33,14 @@ export class Cyclotron {
         this.spanManager = new SpanManager();
         // TODO: Print that we're waiting for data or something here.
         var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
-        socket.onmessage = event => { this.addEvent(JSON.parse(event.data)); };
+        this.bufferedMessages = [];
+        socket.onmessage = event => {
+            // this.bufferedMessages.push(JSON.parse(event.data));
+            // if (i++ > 1000) {
+            //     return;
+            // }
+            this.addEvent(JSON.parse(event.data));
+        };
         socket.onopen = event => { socket.send("empty_file_release.log"); };
         socket.onerror = event => { alert(`Socket error ${event}`); };
         socket.onclose = event => { alert(`Socket closed ${event}`); };
@@ -43,9 +51,11 @@ export class Cyclotron {
             screenHeight: this.windowHeight,
             worldWidth: 0,
             worldHeight: 0,
-        })
+        });
+        this.timeline.drag().wheel().decelerate();
+        this.timeline.clamp({direction: "all"});
+
         this.app.stage.addChild(this.timeline);
-        this.timeline.drag().pinch().decelerate();
 
         this.ticker = PIXI.ticker.shared;
         this.ticker.autoStart = true;
@@ -60,82 +70,75 @@ export class Cyclotron {
     }
 
     private drawDemo() {
-        let {laneAssignment, visibleSpans, numLanes} = this.computeVisible(0, this.spanManager.maxTime);
-
         if (!this.dirty) {
             return;
         }
-        this.dirty = false
-;
+        this.dirty = false;
+
         this.timeline.x = 0;
         this.timeline.y = 0;
-        this.timeline.worldWidth = this.spanManager.maxTime;
-        this.timeline.worldHeight = numLanes;
 
-        console.log(`Drawing ${visibleSpans.length} spans`);
-
-        visibleSpans.forEach(span => {
-            let rectangle = this.rectangles[span.id];
-            if (rectangle === undefined) {
-                rectangle = new PIXI.Graphics();
-                this.rectangles[span.id] = rectangle;
-                this.timeline.addChild(rectangle);
-            }
-            let end = span.end ? span.end : this.spanManager.maxTime;
-            rectangle.beginFill(0x66CCFF)
-            rectangle.drawRect(
-                span.start,
-                laneAssignment[span.id],
-                end - span.start,
-                1,
-                0.1,
-            );
-            rectangle.endFill();
-        });
-
-        this.timeline.scale.x = this.windowWidth / this.spanManager.maxTime;
-        this.timeline.scale.y = this.windowHeight / numLanes;
-    }
-
-    private computeVisible(startTs, endTs) {
-        let root = new Root(this.spanManager);
-        let stack = root.overlappingChildren(startTs, endTs).reverse();
-
-        var nextLane = 0;
-
-        // lane -> max ts drawn
-        var laneMaxTs = {}
-        var laneAssignment = {};
-        var visible = []
-
-        var span;
-        while (span = stack.pop()) {
-            var lane = null;
-            if (span.parent_id) {
-                let parentLane = laneAssignment[span.parent_id];
-                for (var candidate = parentLane + 1; candidate < nextLane; candidate++) {
-                    let maxTs = laneMaxTs[candidate];
-                    if (maxTs === undefined) {
-                        throw new Error(`Missing max ts for ${lane}`);
-                    }
-                    if (maxTs <= span.start) {
-                        lane = candidate;
-                        break;
-                    }
-                }
-            }
-            if (lane === null) {
-                lane = nextLane++;
-            }
-
-            laneMaxTs[lane] = span.end ? span.end : endTs;
-            laneAssignment[span.id] = lane;
-            visible.push(span);
-
-            span.overlappingChildren(startTs, endTs).reverse().forEach(child => { stack.push(child); })
+        let maxHeight = this.spanManager.numLanes();
+        if (maxHeight === 0 || this.spanManager.maxTime === 0) {
+            return;
         }
 
-        return {laneAssignment, visibleSpans: visible, numLanes: nextLane};
+        this.timeline.worldWidth = this.spanManager.maxTime;
+        this.timeline.worldHeight = maxHeight;
+        this.timeline.scale.x = this.windowWidth / this.spanManager.maxTime;
+        this.timeline.scale.y = this.windowHeight / maxHeight;
+
+        let numDrawn = 0;
+        this.spanManager.listLanes().forEach(lane => {
+            lane.spans.forEach(span => {
+                let end = span.end ? span.end : this.spanManager.maxTime;
+                let container = this.rectangles[span.id];
+                if (container === undefined) {
+                    container = new PIXI.Container();
+                    let rect = new PIXI.Graphics();
+                    rect.beginFill(0x66CCFF)
+                    rect.drawRect(
+                        0,
+                        0,
+                        end - span.start,
+                        0.9,
+                    );
+                    rect.endFill();
+                    container.addChild(rect);
+
+                    let name = new PIXI.Text(span.name);
+                    name.width = end - span.start;
+                    name.height = 0.9;
+                    container.addChild(name);
+
+                    this.rectangles[span.id] = container;
+                    this.timeline.addChild(container);
+                }
+
+                let rect = container.children[0];
+                rect.width = end - span.start;
+                rect.height = 0.9;
+
+                // console.log(`Rect ${span.name}: ${container.children[0].width} x ${container.children[0].height}`)
+                // console.log(`Text ${span.name}: ${container.children[1].width} x ${container.children[1].height}`)
+                // let rect = container.children[0];
+                // rect.beginFill(0x66CCFF);
+                // rect.drawRect(0, 0, end - span.start, 0.9);
+                // rect.endFill();
+                // rect.width = end - span.start;
+                // rect.height = 1;
+
+                // console.log(`${span.name} -> (${span.start}, ${lane.index}, ${end - span.start}, 0.9)`);
+
+                container.x = span.start;
+                container.y = lane.index;
+                container.width = end - span.start;
+                container.height = 0.9;
+
+                numDrawn += 1;
+            })
+        });
+        console.log(`Drew ${numDrawn} spans`);
     }
 }
 

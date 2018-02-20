@@ -1,3 +1,5 @@
+import { Lane } from "./lane";
+
 class OnCPU {
     public end;
 
@@ -20,20 +22,22 @@ class OnCPU {
     }
 }
 
-class Span {
+export class Span {
     public end;
     public scheduled;
     public outcome;
 
+    public laneID;
+    public freeLanes;
+    public maxSubtreeLaneID;
+
     // Derived from `parent_id` pointers.
-    private children;
     public expanded;
 
     constructor(
         readonly name: string,
         readonly id: number,
         readonly parent_id: number,
-        readonly parent_ix: number,
         readonly start: number,
         readonly metadata,
         readonly threadName
@@ -42,38 +46,14 @@ class Span {
         this.scheduled = [];
         this.outcome = null;
 
-        this.children = [];
         this.expanded = true;
-    }
-
-    public getChildren(forceExpanded) {
-        if (this.expanded || forceExpanded) {
-            return this.children;
-        } else {
-            return [];
-        }
-    }
-
-    public overlappingChildren(start, end) {
-        if (this.expanded) {
-            return this.children.filter(span => span.intersects(start, end));
-        } else {
-            return [];
-        }
+        this.laneID = null;
+        this.freeLanes = {};
+        this.maxSubtreeLaneID = null;
     }
 
     public isOpen() {
         return this.end === null;
-    }
-
-    public mergeable(span) {
-        if (this.isOpen()) {
-            return false;
-        }
-        if (span instanceof Root) {
-            return false;
-        }
-        return this.parent_id === span.parent_id && this.end < span.start;
     }
 
     public intersects(start, end) {
@@ -127,45 +107,7 @@ class Span {
     }
 
     public toString = () : string => {
-        return `Span(id: ${this.id}, name: ${this.name}, start: ${this.start}, end: ${this.end})`;
-    }
-}
-
-export class Root {
-    public id;
-    public start;
-    public end;
-
-    constructor(public manager) {
-        this.id = "root";
-        this.start = 0;
-        this.end = manager.maxTime;
-    }
-
-    public overlappingChildren(start, end) {
-        return this.getChildren(null).filter(span => span.intersects(start, end));
-    }
-
-    public intersects(start, end) {
-        return false;
-    }
-
-    public mergeable(span) {
-        return false;
-    }
-
-    public isOpen() {
-        return true;
-    }
-
-    public isRoot() {
-        return true;
-    }
-
-    public getChildren(force) {
-        return Object.keys(this.manager.threads)
-            .sort()
-            .map(k => this.manager.spans[this.manager.threads[k].id]);
+        return `Span(id: ${this.id}, parent_id: ${this.parent_id}, name: ${this.name}, start: ${this.start}, end: ${this.end})`;
     }
 }
 
@@ -192,47 +134,6 @@ class Thread {
         }
         return 0;
     }
-
-    public logActivity(ts) {
-        let msInt = Math.floor(ts * 1e3);
-
-        if (this.timestamps.length > 0) {
-            let last = this.timestamps[this.timestamps.length - 1];
-            if (last > msInt) {
-                throw new Error("Going back in time for " + this.id);
-            }
-            if (last === msInt) {
-                let newCount = this.counts[this.counts.length - 1] + 1;
-                this.counts[this.counts.length - 1] = newCount;
-                if (newCount > this.maxCount) {
-                    this.maxCount = newCount;
-                }
-                return;
-            }
-        }
-
-        if (this.maxCount < 1) {
-            this.maxCount = 1;
-        }
-        this.timestamps.push(msInt);
-        this.counts.push(1);
-    }
-
-    public drawActivity(ctx) {
-        if (this.timestamps.length === 0) {
-            return;
-        }
-
-        ctx.fillStyle = "green";
-        ctx.clearRect(0, 0, this.timestamps[this.timestamps.length - 1], 1);
-
-        let cur_ms = -1;
-        this.timestamps.forEach((ts, i) => {
-            let count = this.counts[i];
-
-            ctx.fillRect(ts, 0, 1, 1);
-        });
-    }
 }
 
 export class SpanManager {
@@ -243,6 +144,10 @@ export class SpanManager {
 
     private openWakeups;
 
+    private lanes;
+    private laneByIndex;
+    private nextLaneID;
+
     constructor() {
         this.spans = {};
         this.threads = {};
@@ -250,10 +155,10 @@ export class SpanManager {
         // Maps from a waking Span id to the wakeup. These are removed when `AsyncOnCPU` events arrive.
         this.openWakeups = {};
         this.maxTime = 0;
-    }
 
-    public getThread(name) {
-        return this.spans[this.threads[name].id];
+        this.lanes = {};
+        this.laneByIndex = [];
+        this.nextLaneID = 0;
     }
 
     private getSpan(id) {
@@ -264,57 +169,138 @@ export class SpanManager {
         return span;
     }
 
+    private numLanes(): number {
+        return this.laneByIndex.length;
+    }
+
+    private insertLane(lane: Lane) {
+        let at = lane.index;
+        if (at > this.numLanes()) {
+            throw new Error(`Bad lane insertion: ${at}`);
+        }
+        if (this.lanes[lane.id]) {
+            throw new Error(`Duplicate lane Id: ${lane.id}`);
+        }
+        for (let laneID in this.lanes) {
+            let lane = this.lanes[laneID];
+            if (lane.index >= at) {
+                lane.index++;
+            }
+        }
+        this.lanes[lane.id] = lane;
+
+        let laneByIndex = [];
+        for (let laneID in this.lanes) {
+            let lane = this.lanes[laneID];
+            laneByIndex[lane.index] = lane.id;
+        }
+        this.laneByIndex = laneByIndex;
+    }
+
+    public listLanes() {
+        return this.laneByIndex.map(laneID => this.lanes[laneID]);
+    }
+
+    private assignLane(span) {
+        if (span.parent_id === null) {
+            // Always push new threads at the end.
+            let index = this.numLanes();
+            let lane = new Lane(this.nextLaneID++, index, span);
+            span.laneID = lane.id;
+            span.maxSubtreeLaneID = lane.id;
+            this.insertLane(lane);
+            console.log(`Thread ${span.name} => ${lane.index}`);
+            return lane;
+        }
+
+        let parent = this.getSpan(span.parent_id);
+        let parentLane = this.lanes[parent.laneID];
+
+        let curID = span.parent_id;
+        while (curID !== null) {
+            let ancestor = this.getSpan(curID);
+
+            let candidates = [];
+            for (let laneID in ancestor.freeLanes) {
+                let lane = this.lanes[laneID];
+                if (lane.index > parentLane.index) {
+                    candidates.push(lane.index);
+                }
+            }
+
+            if (candidates.length > 0) {
+                candidates.sort();
+                console.log(`Match for ${span.name} => ${candidates[0]}`);
+                let lane = this.lanes[this.laneByIndex[candidates[0]]];
+                if (!lane.push(span)) {
+                    throw new Error(`Overlap on free lane?`);
+                }
+                delete ancestor.freeLanes[lane.id];
+                span.laneID = lane.id;
+                span.maxSubtreeLaneID = lane.id;
+                return lane;
+            }
+
+            curID = ancestor.parent_id;
+        }
+
+        let maxLane = this.lanes[parent.maxSubtreeLaneID];
+        console.log(`Inserting at ${maxLane.index + 1}`);
+        let lane = new Lane(this.nextLaneID++, maxLane.index + 1, span);
+        span.laneID = lane.id;
+        span.maxSubtreeLaneID = lane.id;
+        this.insertLane(lane);
+        return lane;
+    }
+
     private addSpan(span) {
         if (this.spans[span.id]) {
             throw new Error("Duplicate span ID " + span.id);
         }
-        this.spans[span.id] = span
-    }
+        this.spans[span.id] = span;
+        let assignedLane = this.assignLane(span);
 
-    private convertTs(ts) {
-        if (typeof ts !== "number") {
-            ts = ts.secs + ts.nanos * 1e-9;
+        let curID = span.parent_id;
+        while (curID !== null) {
+            let ancestor = this.getSpan(curID);
+            let lane = this.lanes[ancestor.maxSubtreeLaneID];
+
+            if (lane.index < assignedLane.index) {
+                ancestor.maxSubtreeLaneID = assignedLane.id;
+            }
+
+            curID = ancestor.parent_id;
         }
-        if (ts > this.maxTime) {
-            this.maxTime = ts;
-        }
-        return ts;
     }
 
-    private logActivity(span, ts) {
-        let thread = this.threads[span.threadName];
-        thread.logActivity(ts);
-    }
-
-    private spanStart(start) {
+    private addSpanWithParent(start) {
         let parent = this.getSpan(start.parent_id);
         let span = new Span(
             start.name,
             start.id,
             start.parent_id,
-            parent.children.length,
             this.convertTs(start.ts),
             start.metadata,
             parent.threadName,
         );
+        this.addSpan(span);
+        return span;
+    }
 
-        if (parent.children.length > 0) {
-            let last = parent.children[parent.children.length - 1];
-            if (last.start > span.start) {
-                throw new Error("Start times out of order for " + last.id + " and " + span.id);
+    private closeSpan(span, ts) {
+        if (span.parent_id) {
+            let parent = this.getSpan(span.parent_id);
+            parent.freeLanes[span.laneID] = true;
+            for (let laneID in span.freeLanes) {
+                parent.freeLanes[laneID] = true;
             }
         }
-        parent.children.push(span);
-        this.addSpan(span);
-
-        return span;
+        span.close(ts);
     }
 
     public addEvent(event) {
         if (event.AsyncStart) {
-            let span = this.spanStart(event.AsyncStart);
-            let ts = this.convertTs(event.AsyncStart.ts);
-            this.logActivity(span, ts);
+            this.addSpanWithParent(event.AsyncStart);
         } else if (event.AsyncOnCPU) {
             let span = this.getSpan(event.AsyncOnCPU.id);
             // Close any outstanding Wakeups.
@@ -326,23 +312,19 @@ export class SpanManager {
             }
             delete this.openWakeups[event.AsyncOnCPU.id];
             let ts = this.convertTs(event.AsyncOnCPU.ts);
-            this.logActivity(span, ts);
             span.onCPU(this.convertTs(event.AsyncOnCPU.ts));
         } else if (event.AsyncOffCPU) {
             let span = this.getSpan(event.AsyncOffCPU.id);
             let ts = this.convertTs(event.AsyncOffCPU.ts);
-            this.logActivity(span, ts);
             span.offCPU(ts);
         } else if (event.AsyncEnd) {
             let span = this.getSpan(event.AsyncEnd.id);
             let ts = this.convertTs(event.AsyncEnd.ts);
-            this.logActivity(span, ts);
-            span.close(ts);
             span.outcome = event.outcome;
+            this.closeSpan(span, ts);
         } else if (event.SyncStart) {
-            let span = this.spanStart(event.SyncStart);
+            let span = this.addSpanWithParent(event.SyncStart);
             let ts = this.convertTs(event.SyncStart.ts);
-            this.logActivity(span, ts);
             span.onCPU(ts);
         } else if (event.SyncEnd) {
             let span = this.getSpan(event.SyncEnd.id);
@@ -350,9 +332,8 @@ export class SpanManager {
                 throw new Error("More than one schedule for sync span " + span.id);
             }
             let ts = this.convertTs(event.SyncEnd.ts)
-            this.logActivity(span, ts);
             span.offCPU(ts);
-            span.close(ts);
+            this.closeSpan(span, ts);
         } else if (event.ThreadStart) {
             let start = event.ThreadStart;
             if (this.threads[start.name]) {
@@ -362,7 +343,6 @@ export class SpanManager {
                 start.name,
                 start.id,
                 null, // No parent on threads
-                null,
                 this.convertTs(start.ts),
                 null, // No metadata on threads
                 start.name,
@@ -371,7 +351,7 @@ export class SpanManager {
             this.threads[start.name] = new Thread(start.id);
         } else if (event.ThreadEnd) {
             let span = this.getSpan(event.ThreadEnd.id);
-            span.close(this.convertTs(event.ThreadEnd.ts));
+            this.closeSpan(span, this.convertTs(event.ThreadEnd.ts));
         } else if (event.Wakeup) {
             if (event.Wakeup.parked_span == event.Wakeup.waking_span) {
                 // We don't track self-wakeups.
@@ -391,5 +371,15 @@ export class SpanManager {
         } else {
             throw new Error("Unexpected event: " + event);
         }
+    }
+
+    private convertTs(ts) {
+        if (typeof ts !== "number") {
+            ts = ts.secs + ts.nanos * 1e-9;
+        }
+        if (ts > this.maxTime) {
+            this.maxTime = ts;
+        }
+        return ts;
     }
 }
