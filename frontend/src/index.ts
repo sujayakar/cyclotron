@@ -138,38 +138,6 @@ export class Cyclotron {
                     );
                     rect.endFill();
 
-
-                    //     container = new PIXI.Container();
-                    //     let rect = new PIXI.Graphics();
-                    //     rect.beginFill(0x484848)
-                    //     rect.drawRect(
-                    //         0,
-                    //         0,
-                    //         end - span.start,
-                    //         0.9,
-                    //     );
-                    //     rect.endFill();
-                    //     container.addChild(rect);
-
-                    //     // let style = new PIXI.TextStyle({fill: "white"});
-                    //     // let name = new PIXI.Text(span.name, style);
-                    //     // name.width = end - span.start;
-                    //     // name.height = 0.9;
-                    //     // container.addChild(name);
-
-                    //     this.rectangles[span.id] = container;
-                    //     this.timeline.addChild(container);
-                    // }
-
-                    // let rect = container.children[0];
-                    // rect.width = end - span.start;
-                    // rect.height = 0.9;
-
-                    // container.x = span.start;
-                    // container.y = lane.index;
-                    // container.width = end - span.start;
-                    // container.height = 0.9;
-
                     numDrawn += 1;
                 })
             });
@@ -203,7 +171,12 @@ export class Cyclotron {
                         this.textOverlay.addChild(text);
                     }
                     text.visible = visible;
-                    text.mask = null;
+
+                    if (text.mask != null) {
+                        text.mask.destroy();
+                        text.mask = null;
+                    }
+
                     if (!visible) {
                         return;
                     }
@@ -225,9 +198,23 @@ export class Cyclotron {
                     text.height = text.height * scale;
                     text.width = text.width * scale;
 
-                    if (text.width * scale > tsWidthPx * widthTs) {
+                    if (text.width * scale < 25) {
                         text.visible = false;
                         return;
+                    }
+
+                    if (text.width * scale > tsWidthPx * widthTs) {
+                        let mask = new PIXI.Graphics();
+                        mask.clear();
+                        mask.beginFill(0x000000);
+                        mask.drawRect(
+                            text.x,
+                            text.y,
+                            tsWidthPx * widthTs,
+                            text.height,
+                        );
+                        mask.endFill();
+                        text.mask = mask;
                     }
 
                     numLabels++;

@@ -1,4 +1,10 @@
 1) cd server; cargo run -- --http=3000 --ws=3001 --traces=../examples/ --frontend=../frontend/
-2) open up localhost:3000 in browser, shouldn't show anything
-3) cd examples; python stream.py, still shouldn't show anything
-4) hit enter on stream.py, stuff should start streaming in to the browser
+2) open up localhost:3000/frontend/src/index.html in browser
+
+
+= TODO =
+[ ] Create sprite group per lane, move rectangles onto lane
+[ ] Drawing lanes in viewport is 1) deciding which lanes overlap, 2) scaling them to fit, 3) hiding the others
+[ ] Then, draw text in screen space w/masks on top
+[ ] Implement collapsing by logging visibility on rectangles, hiding entire lanes if invisible
+[ ] Add arrows?
