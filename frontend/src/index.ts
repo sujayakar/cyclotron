@@ -1,13 +1,18 @@
 import PIXI = require("pixi.js");
 import Viewport = require("pixi-viewport");
 import { SpanManager } from "./model";
+import d3 = require("d3");
 
 export class Cyclotron {
     private spanManager;
     private app;
+    private topAxisContainer;
+    private topAxis;
 
     private windowWidth;
     private windowHeight;
+    private axisHeight;
+    private viewportHeight;
     private rectangles;
     private text;
     private ticker;
@@ -18,19 +23,31 @@ export class Cyclotron {
     private bufferedMessages;
 
     constructor() {
+        this.windowWidth = window.innerWidth * 0.9;
+        this.windowHeight = window.innerHeight * 0.9;
+
+        this.axisHeight = this.windowHeight * 0.05;
+        this.viewportHeight = this.windowHeight * 0.95;
+
+        this.topAxisContainer = d3.select("body")
+            .append("svg")
+            .attr("width", this.windowWidth)
+            .attr("height", this.axisHeight)
+            .attr("class", "chart");
+        this.topAxis = this.topAxisContainer.append("g")
+            .attr("width", this.windowWidth)
+            .attr("class", "top-axis")
+            .append("g");
+
         this.app = new PIXI.Application({
             antialias: false,
             transparent: false,
             resolution: window.devicePixelRatio,
         });
-
-        this.windowWidth = window.innerWidth * 0.9;
-        this.windowHeight = window.innerHeight * 0.9;
-
         this.app.renderer.backgroundColor = 0xfafafa;
         this.app.renderer.view.style.className = "viewport";
         this.app.renderer.autoResize = true;
-        this.app.renderer.resize(this.windowWidth, this.windowHeight);
+        this.app.renderer.resize(this.windowWidth, this.viewportHeight);
         document.body.appendChild(this.app.view);
 
         this.spanManager = new SpanManager();
@@ -51,7 +68,7 @@ export class Cyclotron {
         this.text = {};
         this.timeline = new Viewport({
             screenWidth: this.windowWidth,
-            screenHeight: this.windowHeight,
+            screenHeight: this.viewportHeight,
             worldWidth: 0,
             worldHeight: 0,
         });
@@ -69,7 +86,7 @@ export class Cyclotron {
         this.textOverlay.x = 0;
         this.textOverlay.y = 0;
         this.textOverlay.width = this.windowWidth;
-        this.textOverlay.height = this.windowHeight;
+        this.textOverlay.height = this.viewportHeight;
         this.app.stage.addChild(this.textOverlay);
 
         this.ticker = PIXI.ticker.shared;
@@ -152,8 +169,27 @@ export class Cyclotron {
 
             let startTs = this.timeline.hitArea.x;
             let endTs = startTs + this.timeline.hitArea.width;
-            let laneHeightPx = this.windowHeight / maxHeight;
+            let laneHeightPx = this.viewportHeight / maxHeight;
             let tsWidthPx = this.windowWidth / this.timeline.hitArea.width;
+
+            let axisScale = d3.scaleLinear()
+                .domain([startTs, endTs])
+                .range([0, this.windowWidth]);
+            this.topAxis.call(d3.axisBottom(axisScale).ticks(5).tickFormat(seconds => {
+                let delta = seconds - startTs;
+                function formatTime(n, precision) {
+                    if (n < 0.001) {
+                        return `${(n * 1e6).toFixed(precision)}μs`;
+                    } else if (n < 1) {
+                        return `${(n * 1e3).toFixed(precision)}ms`;
+                    } else if (n < 60) {
+                        return `${n.toFixed(precision)}s`;
+                    } else {
+                        return `${(n / 60).toFixed(precision)}m`;
+                    }
+                }
+                return `${formatTime(startTs, 0)}+${formatTime(delta, 2)}`;
+            }));
 
             let numLabels = 0;
             this.spanManager.listLanes().forEach(lane => {
