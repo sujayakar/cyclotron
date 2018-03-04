@@ -3,15 +3,53 @@ import Viewport = require("pixi-viewport");
 import { SpanManager } from "./model";
 import d3 = require("d3");
 
+class Axis {
+    private container;
+    private axis;
+
+    constructor(private windowWidth, private axisHeight) {
+        this.container = d3.select("body")
+            .append("svg")
+            .attr("width", windowWidth)
+            .attr("height", axisHeight)
+            .attr("class", "chart");
+        this.axis = this.container.append("g")
+            .attr("width", windowWidth)
+            .attr("class", "top-axis")
+            .append("g");
+
+    }
+
+    public update(startTs, endTs) {
+        let axisScale = d3.scaleLinear()
+            .domain([startTs, endTs])
+            .range([0, this.windowWidth]);
+
+        this.axis.call(d3.axisBottom(axisScale).ticks(5).tickFormat(seconds => {
+            let delta = seconds - startTs;
+            function formatTime(n, precision) {
+                if (n < 0.001) {
+                    return `${(n * 1e6).toFixed(precision)}μs`;
+                } else if (n < 1) {
+                    return `${(n * 1e3).toFixed(precision)}ms`;
+                } else if (n < 60) {
+                    return `${n.toFixed(precision)}s`;
+                } else {
+                    return `${(n / 60).toFixed(precision)}m`;
+                }
+            }
+            return `${formatTime(startTs, 0)}+${formatTime(delta, 2)}`;
+        }));
+    }
+}
+
 export class Cyclotron {
     private spanManager;
     private app;
-    private topAxisContainer;
-    private topAxis;
+    private axis;
 
     private windowWidth;
     private windowHeight;
-    private axisHeight;
     private viewportHeight;
     private rectangles;
     private text;
@@ -26,18 +64,10 @@ export class Cyclotron {
         this.windowWidth = window.innerWidth * 0.9;
         this.windowHeight = window.innerHeight * 0.9;
 
-        this.axisHeight = this.windowHeight * 0.05;
+        let axisHeight = this.windowHeight * 0.05;
         this.viewportHeight = this.windowHeight * 0.95;
 
-        this.topAxisContainer = d3.select("body")
-            .append("svg")
-            .attr("width", this.windowWidth)
-            .attr("height", this.axisHeight)
-            .attr("class", "chart");
-        this.topAxis = this.topAxisContainer.append("g")
-            .attr("width", this.windowWidth)
-            .attr("class", "top-axis")
-            .append("g");
+        this.axis = new Axis(this.windowWidth, axisHeight);
 
         this.app = new PIXI.Application({
             antialias: false,
@@ -172,24 +202,7 @@ export class Cyclotron {
             let laneHeightPx = this.viewportHeight / maxHeight;
             let tsWidthPx = this.windowWidth / this.timeline.hitArea.width;
 
-            let axisScale = d3.scaleLinear()
-                .domain([startTs, endTs])
-                .range([0, this.windowWidth]);
-            this.topAxis.call(d3.axisBottom(axisScale).ticks(5).tickFormat(seconds => {
-                let delta = seconds - startTs;
-                function formatTime(n, precision) {
-                    if (n < 0.001) {
-                        return `${(n * 1e6).toFixed(precision)}μs`;
-                    } else if (n < 1) {
-                        return `${(n * 1e3).toFixed(precision)}ms`;
-                    } else if (n < 60) {
-                        return `${n.toFixed(precision)}s`;
-                    } else {
-                        return `${(n / 60).toFixed(precision)}m`;
-                    }
-                }
-                return `${formatTime(startTs, 0)}+${formatTime(delta, 2)}`;
-            }));
+            this.axis.update(startTs, endTs);
 
             let numLabels = 0;
             this.spanManager.listLanes().forEach(lane => {
@@ -198,11 +211,7 @@ export class Cyclotron {
                     let text = this.text[span.id];
                     if (text === undefined) {
                         let style = new PIXI.TextStyle({fill: "white"});
-                        let name = span.name;
-                        if (name.length > 80) {
-                            name = name.substring(0, 77) + "...";
-                        }
-                        text = new PIXI.Text(name, style);
+                        text = new PIXI.Text(span.name, style);
                         this.text[span.id] = text;
                         this.textOverlay.addChild(text);
                     }
