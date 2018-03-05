@@ -25,7 +25,7 @@ export class Lane {
 
     public overlaps(startTs, endTs): boolean {
         for (let span of this.spans) {
-            if (span.intersects(startTs, endTs)) {
+            if (span.overlaps(startTs, endTs)) {
                 return true;
             }
         }

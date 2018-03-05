@@ -33,6 +33,9 @@ export class Span {
 
     public rect;
 
+    public children: Array<Span>;
+    public inheritVisible: boolean;
+
     constructor(
         readonly name: string,
         readonly id: number,
@@ -50,20 +53,41 @@ export class Span {
         this.maxSubtreeLaneID = null;
 
         this.rect = new PIXI.Graphics();
+        this.children = [];
+        this.inheritVisible = true;
+    }
+
+    public collapse() {
+        this.inheritVisible = false;
+        let stack = this.children.slice(0);
+        while (stack.length > 0) {
+            let element = stack.pop();
+            element.inheritVisible = false;
+            element.rect.visible = false;
+            stack.push(...element.children);
+        }
+    }
+
+    public expand() {
+        this.inheritVisible = true;
+        let stack = this.children.slice(0);
+        while (stack.length > 0) {
+            let element = stack.pop();
+            element.inheritVisible = true;
+            element.rect.visible = true;
+            stack.push(...element.children);
+        }
     }
 
     public isOpen() {
         return this.end === null;
     }
 
-    public intersects(start, end) {
+    public overlaps(start, end) {
+        if (!this.rect.visible) {
+            return false;
+        }
         return this.start < end && (this.end === null || this.end > start);
-    }
-
-    public overlaps(span) {
-        let first  = this.start < span.start ? this : span;
-        let second = this.start < span.start ? span : this;
-        return first.end === null || second.start < first.end;
     }
 
     private draw(endTs) {

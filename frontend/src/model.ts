@@ -149,6 +149,12 @@ export class SpanManager {
         this.spans[span.id] = span;
         let assignedLane = this.assignLane(span);
 
+        if (span.parent_id !== null) {
+            let parent = this.getSpan(span.parent_id);
+            parent.children.push(span);
+            span.rect.visible = parent.inheritVisible;
+        }
+
         let curID = span.parent_id;
         while (curID !== null) {
             let ancestor = this.getSpan(curID);

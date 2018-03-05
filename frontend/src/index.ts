@@ -215,7 +215,7 @@ export class Cyclotron {
         let numLabels = 0;
         this.spanManager.listLanes().forEach(lane => {
             lane.spans.forEach(span => {
-                let visible = span.intersects(startTs, endTs);
+                let visible = span.overlaps(startTs, endTs);
                 let text = this.text[span.id];
                 if (text === undefined) {
                     let style = new PIXI.TextStyle({fill: "white"});
