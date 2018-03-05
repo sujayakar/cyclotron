@@ -76,7 +76,6 @@ export class Span {
         let stack = this.children.slice(0);
         while (stack.length > 0) {
             let element = stack.pop();
-            element.inheritVisible = false;
             element.rect.visible = false;
             stack.push(...element.children);
         }
@@ -87,9 +86,11 @@ export class Span {
         let stack = this.children.slice(0);
         while (stack.length > 0) {
             let element = stack.pop();
-            element.inheritVisible = true;
             element.rect.visible = true;
-            stack.push(...element.children);
+
+            if (element.inheritVisible) {
+                stack.push(...element.children);
+            }
         }
     }
 
