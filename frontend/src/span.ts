@@ -64,8 +64,10 @@ export class Span {
 
     public toggleCollapsed() {
         if (this.inheritVisible) {
+            console.log(`Collapsing ${this.id}`);
             this.collapse();
         } else {
+            console.log(`Expanding ${this.id}`);
             this.expand();
         }
         this.manager.dirty = true;

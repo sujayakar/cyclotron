@@ -271,7 +271,6 @@ export class Cyclotron {
                 numLabels++;
             });
         });
-        console.log(`Drew ${numLabels} labels`);
     }
 
     private draw() {

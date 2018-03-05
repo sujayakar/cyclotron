@@ -123,11 +123,12 @@ export class SpanManager {
             }
 
             if (candidates.length > 0) {
-                candidates.sort();
+                candidates.sort((a, b) => a - b);
                 let lane = this.lanes[this.laneByIndex[candidates[0]]];
                 if (!lane.push(span)) {
                     throw new Error(`Overlap on free lane?`);
                 }
+
                 delete ancestor.freeLanes[lane.id];
                 span.laneID = lane.id;
                 span.maxSubtreeLaneID = lane.id;
