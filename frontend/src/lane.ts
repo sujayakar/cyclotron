@@ -12,7 +12,7 @@ export class Lane {
         this.container.x = 0;
         this.container.y = 0;
 
-        this.container.addChild(span.rect);
+        this.container.addChild(span.container);
     }
 
     public isOpen(): boolean {
@@ -44,7 +44,7 @@ export class Lane {
             throw new Error(`Out of order span ${span}`);
         }
         this.spans.push(span);
-        this.container.addChild(span.rect);
+        this.container.addChild(span.container);
         return true;
     }
 

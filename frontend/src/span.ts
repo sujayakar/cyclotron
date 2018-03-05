@@ -31,7 +31,8 @@ export class Span {
     public freeLanes;
     public maxSubtreeLaneID;
 
-    public rect;
+    public container;
+    public rectangle;
 
     public children: Array<Span>;
     public inheritVisible: boolean;
@@ -54,13 +55,16 @@ export class Span {
         this.freeLanes = {};
         this.maxSubtreeLaneID = null;
 
-        this.rect = new PIXI.Graphics();
+        this.rectangle = new PIXI.Graphics();
+        this.container = new PIXI.Container();
+        this.container.addChild(this.rectangle);
+
         this.children = [];
         this.inheritVisible = true;
 
-        this.rect.interactive = true;
-        this.rect.buttonMode = true;
-        this.rect.on("click", () => this.toggleCollapsed());
+        this.container.interactive = true;
+        this.container.buttonMode = true;
+        this.container.on("click", () => this.toggleCollapsed());
 
         let style = new PIXI.TextStyle({fill: "white"});
         this.text = new PIXI.Text(this.name, style);
@@ -82,7 +86,7 @@ export class Span {
         let stack = this.children.slice(0);
         while (stack.length > 0) {
             let element = stack.pop();
-            element.rect.visible = false;
+            element.container.visible = false;
             stack.push(...element.children);
         }
     }
@@ -92,7 +96,7 @@ export class Span {
         let stack = this.children.slice(0);
         while (stack.length > 0) {
             let element = stack.pop();
-            element.rect.visible = true;
+            element.container.visible = true;
 
             if (element.inheritVisible) {
                 stack.push(...element.children);
@@ -105,22 +109,22 @@ export class Span {
     }
 
     public overlaps(start, end) {
-        if (!this.rect.visible) {
+        if (!this.container.visible) {
             return false;
         }
         return this.start < end && (this.end === null || this.end > start);
     }
 
     private draw(endTs) {
-        this.rect.clear();
-        this.rect.beginFill(0x484848);
-        this.rect.drawRect(
+        this.rectangle.clear();
+        this.rectangle.beginFill(0x484848);
+        this.rectangle.drawRect(
             this.start,
             0,
             endTs - this.start,
             0.9,
         );
-        this.rect.endFill();
+        this.rectangle.endFill();
     }
 
     public updateMaxTs(maxTs) {
@@ -169,6 +173,17 @@ export class Span {
         }
         let last = this.scheduled[this.scheduled.length - 1];
         last.close(ts);
+
+        let rect = new PIXI.Graphics();
+        rect.beginFill(0x00ff00, 0.15);
+        rect.drawRect(
+            last.start,
+            0,
+            ts - last.start,
+            0.9,
+        )
+        rect.endFill();
+        this.container.addChild(rect);
     }
 
     public toString = () : string => {

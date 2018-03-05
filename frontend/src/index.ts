@@ -27,20 +27,23 @@ class Axis {
             .domain([startTs, endTs])
             .range([0, this.windowWidth]);
 
-        this.axis.call(d3.axisBottom(axisScale).ticks(5).tickFormat(seconds => {
+        this.axis.call(d3.axisBottom(axisScale).ticks(10).tickFormat(seconds => {
             let delta = seconds - startTs;
-            function formatTime(n, precision) {
-                if (n < 0.001) {
-                    return `${(n * 1e6).toFixed(precision)}μs`;
-                } else if (n < 1) {
-                    return `${(n * 1e3).toFixed(precision)}ms`;
-                } else if (n < 60) {
-                    return `${n.toFixed(precision)}s`;
+            function formatTime(n) {
+                if (delta < 0.000001) {
+                    return `${(n * 1e9).toFixed(0)}ns`;
+                }
+                else if (delta < 0.001) {
+                    return `${(n * 1e6).toFixed(0)}μs`;
+                } else if (delta < 1) {
+                    return `${(n * 1e3).toFixed(0)}ms`;
+                } else if (delta < 60) {
+                    return `${n.toFixed(0)}s`;
                 } else {
-                    return `${(n / 60).toFixed(precision)}m`;
+                    return `${(n / 60).toFixed(0)}m`;
                 }
             }
-            return `${formatTime(startTs, 0)}+${formatTime(delta, 2)}`;
+            return formatTime(seconds);
         }));
     }
 }

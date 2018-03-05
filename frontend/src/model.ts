@@ -162,7 +162,7 @@ export class SpanManager {
         if (span.parent_id !== null) {
             let parent = this.getSpan(span.parent_id);
             parent.children.push(span);
-            span.rect.visible = parent.inheritVisible;
+            span.container.visible = parent.inheritVisible;
         }
 
         let curID = span.parent_id;
