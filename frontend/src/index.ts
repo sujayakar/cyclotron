@@ -199,17 +199,12 @@ export class Cyclotron {
     }
 
     private drawTextOverlay(startTs, endTs, laneHeightPx, tsWidthPx, assignment) {
-        let numLabels = 0;
+        this.textOverlay.removeChildren();
+
         this.spanManager.listLanes().forEach(lane => {
             lane.spans.forEach(span => {
+                let text = span.text;
                 let visible = span.overlaps(startTs, endTs);
-                let text = this.text[span.id];
-                if (text === undefined) {
-                    let style = new PIXI.TextStyle({fill: "white"});
-                    text = new PIXI.Text(span.name, style);
-                    this.text[span.id] = text;
-                    this.textOverlay.addChild(text);
-                }
                 text.visible = visible;
 
                 if (text.mask != null) {
@@ -220,6 +215,9 @@ export class Cyclotron {
                 if (!visible) {
                     return;
                 }
+
+                this.textOverlay.addChild(text);
+
                 let scale = laneHeightPx / text.height;
                 let screenRelTs = span.start - this.timeline.hitArea.x;
                 if (screenRelTs < 0) {
@@ -260,8 +258,6 @@ export class Cyclotron {
                     mask.endFill();
                     text.mask = mask;
                 }
-
-                numLabels++;
             });
         });
     }

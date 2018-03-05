@@ -35,6 +35,7 @@ export class Span {
 
     public children: Array<Span>;
     public inheritVisible: boolean;
+    public text;
 
     constructor(
         readonly name: string,
@@ -60,6 +61,9 @@ export class Span {
         this.rect.interactive = true;
         this.rect.buttonMode = true;
         this.rect.on("click", () => this.toggleCollapsed());
+
+        let style = new PIXI.TextStyle({fill: "white"});
+        this.text = new PIXI.Text(this.name, style);
     }
 
     public toggleCollapsed() {

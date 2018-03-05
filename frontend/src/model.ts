@@ -43,7 +43,8 @@ export class SpanManager {
         this.spans = {};
         this.threads = {};
         this.wakeups = [];
-        // Maps from a waking Span id to the wakeup. These are removed when `AsyncOnCPU` events arrive.
+        // Maps from a waking Span id to the wakeup. These are removed when
+        // `AsyncOnCPU` events arrive.
         this.openWakeups = {};
         this.maxTime = 0;
 
