@@ -144,64 +144,58 @@ export class Cyclotron {
         };
     }
 
-    private drawLanes() {
-        if (!this.spanManager.dirty) {
-            return;
-        }
-        if (this.spanManager.numLanes() === 0 || this.spanManager.maxTime === 0) {
-            return;
-        }
-
-        let endTs = this.lastViewport.ts + this.lastViewport.width;
-        let assignment = this.drawVisibleLanes(this.lastViewport.ts, endTs);
-
-        let maxHeight = this.spanManager.numLanes();
-        this.timeline.worldWidth = this.spanManager.maxTime;
-        this.timeline.worldHeight = maxHeight;
-
-        let clampZoom = this.timeline.plugins['clamp-zoom'];
-        clampZoom.minHeight = maxHeight;
-        clampZoom.maxHeight = maxHeight;
-        clampZoom.maxWidth = this.spanManager.maxTime;
+    private drawLanes(assignment) {
+        this.drawVisibleLanes(assignment);
+        this.spanManager.dirty = false;
     }
 
-    private drawVisibleLanes(startTs, endTs) {
+    private computeAssignment(startTs, endTs) {
         let nextLane = 0;
         let assignment = {};
-
         this.spanManager.listLanes().forEach(lane => {
             lane.updateMaxTs(this.spanManager.maxTime);
-            lane.container.x = 0;
-            if (!lane.overlaps(startTs, endTs)) {
-                lane.container.visible = false;
-            } else {
-                lane.container.visible = true;
-                lane.container.y = nextLane++;
-                assignment[lane.id] = lane.container.y;
+            if (lane.overlaps(startTs, endTs)) {
+                assignment[lane.id] = nextLane++;
+
             }
         });
-
         return assignment;
     }
 
-    private drawViewport() {
-        if (!this.viewportDirty() && !this.spanManager.dirty) {
-            return;
-        }
+    private drawVisibleLanes(assignment) {
+        let numLanes = Object.keys(assignment).length;
 
-        let maxHeight = this.spanManager.numLanes();
-        if (maxHeight === 0 || this.spanManager.maxTime === 0) {
-            return;
-        }
+        this.timeline.worldWidth = this.spanManager.maxTime;
+        this.timeline.worldHeight = numLanes;
 
+        let clampZoom = this.timeline.plugins['clamp-zoom'];
+        clampZoom.minHeight = numLanes;
+        clampZoom.maxHeight = numLanes;
+        clampZoom.maxWidth = this.spanManager.maxTime;
+
+        this.spanManager.listLanes().forEach(lane => {
+            lane.container.x = 0;
+            let offset = assignment[lane.id];
+            if (offset === undefined) {
+                lane.container.visible = false;
+            } else {
+                lane.container.visible = true;
+                lane.container.y = offset;
+            }
+        })
+    }
+
+    private drawViewport(assignment) {
         let startTs = this.timeline.hitArea.x;
         let endTs = startTs + this.timeline.hitArea.width;
         this.axis.update(startTs, endTs);
 
-        let assignment = this.drawVisibleLanes(startTs, endTs);
+        let maxHeight = Object.keys(assignment).length;
         let laneHeightPx = this.viewportHeight / maxHeight;
         let tsWidthPx = this.windowWidth / this.timeline.hitArea.width;
         this.drawTextOverlay(startTs, endTs, laneHeightPx, tsWidthPx, assignment);
+
+        this.saveViewport();
     }
 
     private drawTextOverlay(startTs, endTs, laneHeightPx, tsWidthPx, assignment) {
@@ -273,11 +267,21 @@ export class Cyclotron {
     }
 
     private draw() {
-        this.drawLanes();
-        this.drawViewport();
+        if (this.spanManager.numLanes() === 0 || this.spanManager.maxTime === 0) {
+            return;
+        }
+        if (!this.viewportDirty() && !this.spanManager.dirty) {
+            return;
+        }
 
-        this.spanManager.dirty = false;
-        this.saveViewport();
+        let startTs = this.timeline.hitArea.x;
+        let endTs = startTs + this.timeline.hitArea.width;
+        let assignment = this.computeAssignment(startTs, endTs);
+        this.drawLanes(assignment);
+        this.drawViewport(assignment);
+
+        // TODO: Why do we need this second draw to get text/rects to line up?
+        this.drawLanes(assignment);
     }
 }
 
