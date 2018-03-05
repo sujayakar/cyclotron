@@ -107,7 +107,6 @@ export class Cyclotron {
         this.ticker.autoStart = true;
         this.ticker.add(this.draw, this);
 
-        this.lanesDirty = false;
         this.lastViewport = {width: 0, height: 0, ts: 0};
 
         this.spanManager = new SpanManager(this.timeline);
@@ -127,7 +126,6 @@ export class Cyclotron {
 
     private addEvent(event) {
         this.spanManager.addEvent(event);
-        this.lanesDirty = true;
     }
 
     private viewportDirty() {
@@ -147,7 +145,7 @@ export class Cyclotron {
     }
 
     private drawLanes() {
-        if (!this.lanesDirty) {
+        if (!this.spanManager.dirty) {
             return;
         }
         if (this.spanManager.numLanes() === 0 || this.spanManager.maxTime === 0) {
@@ -165,8 +163,6 @@ export class Cyclotron {
 
         let endTs = this.lastViewport.ts + this.lastViewport.width;
         this.drawVisibleLanes(this.lastViewport.ts, endTs);
-
-        this.lanesDirty = false;
     }
 
     private drawVisibleLanes(startTs, endTs) {
@@ -189,7 +185,7 @@ export class Cyclotron {
     }
 
     private drawViewport() {
-        if (!this.viewportDirty()) {
+        if (!this.viewportDirty() && !this.spanManager.dirty) {
             return;
         }
 
@@ -207,8 +203,6 @@ export class Cyclotron {
 
         let assignment = this.drawVisibleLanes(startTs, endTs);
         this.drawTextOverlay(startTs, endTs, laneHeightPx, tsWidthPx, assignment);
-
-        this.saveViewport();
     }
 
     private drawTextOverlay(startTs, endTs, laneHeightPx, tsWidthPx, assignment) {
@@ -283,6 +277,9 @@ export class Cyclotron {
     private draw() {
         this.drawLanes();
         this.drawViewport();
+
+        this.spanManager.dirty = false;
+        this.saveViewport();
     }
 }
 

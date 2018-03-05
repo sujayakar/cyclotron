@@ -37,6 +37,7 @@ export class SpanManager {
     private lanes;
     private laneByIndex;
     private nextLaneID;
+    public dirty;
 
     constructor(private timeline) {
         this.spans = {};
@@ -49,6 +50,8 @@ export class SpanManager {
         this.lanes = {};
         this.laneByIndex = [];
         this.nextLaneID = 0;
+
+        this.dirty = false;
     }
 
     private getSpan(id) {
@@ -177,6 +180,7 @@ export class SpanManager {
             this.convertTs(start.ts),
             start.metadata,
             parent.threadName,
+            this,
         );
         this.addSpan(span);
         return span;
@@ -241,6 +245,7 @@ export class SpanManager {
                 this.convertTs(start.ts),
                 null, // No metadata on threads
                 start.name,
+                this,
             );
             this.addSpan(span);
             this.threads[start.name] = new Thread(start.id);
@@ -266,6 +271,7 @@ export class SpanManager {
         } else {
             throw new Error("Unexpected event: " + event);
         }
+        this.dirty = true;
     }
 
     private convertTs(ts) {

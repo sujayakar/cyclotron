@@ -42,7 +42,8 @@ export class Span {
         readonly parent_id: number,
         readonly start: number,
         readonly metadata,
-        readonly threadName
+        readonly threadName,
+        readonly manager
     ) {
         this.end = null;
         this.scheduled = [];
@@ -55,6 +56,19 @@ export class Span {
         this.rect = new PIXI.Graphics();
         this.children = [];
         this.inheritVisible = true;
+
+        this.rect.interactive = true;
+        this.rect.buttonMode = true;
+        this.rect.on("click", () => this.toggleCollapsed());
+    }
+
+    public toggleCollapsed() {
+        if (this.inheritVisible) {
+            this.collapse();
+        } else {
+            this.expand();
+        }
+        this.manager.dirty = true;
     }
 
     public collapse() {
