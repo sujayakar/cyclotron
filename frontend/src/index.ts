@@ -3,6 +3,8 @@ import Viewport = require("pixi-viewport");
 import { SpanManager } from "./model";
 import d3 = require("d3");
 
+const arrowColor = 0xf44336;
+
 class Axis {
     private container;
     private axis;
@@ -51,13 +53,12 @@ export class Cyclotron {
     private windowWidth;
     private windowHeight;
     private viewportHeight;
-    private text;
     private ticker;
     private lanesDirty;
     private lastViewport;
     private timeline;
     private textOverlay;
-    private bufferedMessages;
+    private arrowOverlay;
 
     constructor() {
         this.windowWidth = window.innerWidth * 0.9;
@@ -79,7 +80,6 @@ export class Cyclotron {
         this.app.renderer.resize(this.windowWidth, this.viewportHeight);
         document.body.appendChild(this.app.view);
 
-        this.text = {};
         this.timeline = new Viewport({
             screenWidth: this.windowWidth,
             screenHeight: this.viewportHeight,
@@ -103,6 +103,13 @@ export class Cyclotron {
         this.textOverlay.height = this.viewportHeight;
         this.app.stage.addChild(this.textOverlay);
 
+        this.arrowOverlay = new PIXI.Container();
+        this.arrowOverlay.x = 0;
+        this.arrowOverlay.y = 0;
+        this.arrowOverlay.width = this.windowWidth;
+        this.arrowOverlay.height = this.viewportHeight;
+        this.app.stage.addChild(this.arrowOverlay);
+
         this.ticker = PIXI.ticker.shared;
         this.ticker.autoStart = true;
         this.ticker.add(this.draw, this);
@@ -112,13 +119,8 @@ export class Cyclotron {
         this.spanManager = new SpanManager(this.timeline);
         // TODO: Print that we're waiting for data or something here.
         var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
-        this.bufferedMessages = [];
         var i = 0;
-        socket.onmessage = event => {
-            // setTimeout(() => { this.addEvent(JSON.parse(event.data)); }, i++ * 10);
-            // this.bufferedMessages.push(JSON.parse(event.data));
-            this.addEvent(JSON.parse(event.data));
-        };
+        socket.onmessage = event => { this.addEvent(JSON.parse(event.data)); };
         socket.onopen = event => { socket.send("empty_file_release.log"); };
         socket.onerror = event => { alert(`Socket error ${event}`); };
         socket.onclose = event => { alert(`Socket closed ${event}`); };
@@ -194,6 +196,7 @@ export class Cyclotron {
         let laneHeightPx = this.viewportHeight / maxHeight;
         let tsWidthPx = this.windowWidth / this.timeline.hitArea.width;
         this.drawTextOverlay(startTs, endTs, laneHeightPx, tsWidthPx, assignment);
+        this.drawArrowOverlay(startTs, endTs, laneHeightPx, tsWidthPx, assignment);
 
         this.saveViewport();
     }
@@ -205,7 +208,6 @@ export class Cyclotron {
             lane.spans.forEach(span => {
                 let text = span.text;
                 let visible = span.overlaps(startTs, endTs);
-                text.visible = visible;
 
                 if (text.mask != null) {
                     text.mask.destroy();
@@ -215,8 +217,6 @@ export class Cyclotron {
                 if (!visible) {
                     return;
                 }
-
-                this.textOverlay.addChild(text);
 
                 let scale = laneHeightPx / text.height;
                 let screenRelTs = span.start - this.timeline.hitArea.x;
@@ -241,7 +241,6 @@ export class Cyclotron {
                 text.width = text.width * scale;
 
                 if (text.width * scale < 25) {
-                    text.visible = false;
                     return;
                 }
 
@@ -258,8 +257,64 @@ export class Cyclotron {
                     mask.endFill();
                     text.mask = mask;
                 }
+
+                this.textOverlay.addChild(text);
             });
         });
+    }
+
+    private drawArrowOverlay(startTs, endTs, laneHeightPx, tsWidthPx, assignment) {
+        this.arrowOverlay.removeChildren();
+
+        this.spanManager.wakeups.forEach(wakeup => {
+            if (!wakeup.end_ts) {
+                return;
+            }
+            let waking = this.spanManager.getSpan(wakeup.waking_id);
+            if (!waking.overlaps(startTs, endTs)) {
+                return;
+            }
+            if (assignment[waking.laneID] === undefined) {
+                throw new Error(`Missing assignment for ${waking.laneID}`);
+            }
+
+            let parked = this.spanManager.getSpan(wakeup.parked_id);
+            if (!parked.overlaps(startTs, endTs)) {
+                return;
+            }
+            if (assignment[parked.laneID] === undefined) {
+                throw new Error(`Missing assignment for ${parked.laneID}`);
+            }
+
+            let x1 = (wakeup.start_ts - this.timeline.hitArea.x) * tsWidthPx;
+            let y1 = (assignment[waking.laneID] + 0.5) * laneHeightPx;
+            let x2 = (wakeup.end_ts - this.timeline.hitArea.x) * tsWidthPx;
+            let y2 = (assignment[parked.laneID] + 0.5) * laneHeightPx;
+
+            let cX1 = x1;
+            let cY1 = 0.8 * y1 + 0.2 * y2;
+            let cX2 = x1;
+            let cY2 = y2;
+
+            let arrow = wakeup.arrow;
+            arrow.clear();
+            arrow.lineStyle(1.5, arrowColor, 0.7);
+            arrow.moveTo(x1, y1);
+            arrow.bezierCurveTo(cX1, cY1, cX2, cY2, x2, y2);
+
+            let arrowSize = 5;
+            if (x2 - x1 < 20) {
+                arrowSize = 0.25 * (x2 - x1);
+            }
+            // Draw the arrow head
+            arrow.beginFill(arrowColor, 0.7);
+            arrow.drawPolygon([x2, y2,
+                               x2-arrowSize, y2+arrowSize/2,
+                               x2-arrowSize, y2-arrowSize/2]);
+            arrow.endFill();
+
+            this.arrowOverlay.addChild(arrow);
+        })
     }
 
     private draw() {

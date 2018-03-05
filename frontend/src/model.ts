@@ -1,9 +1,14 @@
 import { Lane } from "./lane";
 import { OnCPU, Span } from "./span";
+import PIXI = require("pixi.js");
 
 class Wakeup {
     public end_ts;
-    constructor(public id, public waking_id, public parked_id, public start_ts) {}
+    public arrow;
+
+    constructor(public id, public waking_id, public parked_id, public start_ts) {
+        this.arrow = new PIXI.Graphics();
+    }
 }
 
 
