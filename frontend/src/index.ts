@@ -51,7 +51,6 @@ export class Cyclotron {
     private windowWidth;
     private windowHeight;
     private viewportHeight;
-    private rectangles;
     private text;
     private ticker;
     private lanesDirty;
@@ -80,21 +79,6 @@ export class Cyclotron {
         this.app.renderer.resize(this.windowWidth, this.viewportHeight);
         document.body.appendChild(this.app.view);
 
-        this.spanManager = new SpanManager();
-        // TODO: Print that we're waiting for data or something here.
-        var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
-        this.bufferedMessages = [];
-        var i = 0;
-        socket.onmessage = event => {
-            // setTimeout(() => { this.addEvent(JSON.parse(event.data)); }, i++ * 10);
-            // this.bufferedMessages.push(JSON.parse(event.data));
-            this.addEvent(JSON.parse(event.data));
-        };
-        socket.onopen = event => { socket.send("empty_file_release.log"); };
-        socket.onerror = event => { alert(`Socket error ${event}`); };
-        socket.onclose = event => { alert(`Socket closed ${event}`); };
-
-        this.rectangles = {};
         this.text = {};
         this.timeline = new Viewport({
             screenWidth: this.windowWidth,
@@ -125,6 +109,20 @@ export class Cyclotron {
 
         this.lanesDirty = false;
         this.lastViewport = {width: 0, height: 0, ts: 0};
+
+        this.spanManager = new SpanManager(this.timeline);
+        // TODO: Print that we're waiting for data or something here.
+        var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
+        this.bufferedMessages = [];
+        var i = 0;
+        socket.onmessage = event => {
+            // setTimeout(() => { this.addEvent(JSON.parse(event.data)); }, i++ * 10);
+            // this.bufferedMessages.push(JSON.parse(event.data));
+            this.addEvent(JSON.parse(event.data));
+        };
+        socket.onopen = event => { socket.send("empty_file_release.log"); };
+        socket.onerror = event => { alert(`Socket error ${event}`); };
+        socket.onclose = event => { alert(`Socket closed ${event}`); };
     }
 
     private addEvent(event) {
@@ -148,127 +146,143 @@ export class Cyclotron {
         };
     }
 
-    private draw() {
-        if (this.lanesDirty) {
-            this.lanesDirty = false;
+    private drawLanes() {
+        if (!this.lanesDirty) {
+            return;
+        }
+        if (this.spanManager.numLanes() === 0 || this.spanManager.maxTime === 0) {
+            return;
+        }
 
-            let maxHeight = this.spanManager.numLanes();
-            if (maxHeight === 0 || this.spanManager.maxTime === 0) {
-                return;
+        let maxHeight = this.spanManager.numLanes();
+        this.timeline.worldWidth = this.spanManager.maxTime;
+        this.timeline.worldHeight = maxHeight;
+
+        let clampZoom = this.timeline.plugins['clamp-zoom'];
+        clampZoom.minHeight = maxHeight;
+        clampZoom.maxHeight = maxHeight;
+        clampZoom.maxWidth = this.spanManager.maxTime;
+
+        let endTs = this.lastViewport.ts + this.lastViewport.width;
+        this.drawVisibleLanes(this.lastViewport.ts, endTs);
+
+        this.lanesDirty = false;
+    }
+
+    private drawVisibleLanes(startTs, endTs) {
+        let nextLane = 0;
+        let assignment = {};
+
+        this.spanManager.listLanes().forEach(lane => {
+            lane.updateMaxTs(this.spanManager.maxTime);
+            lane.container.x = 0;
+            if (!lane.overlaps(startTs, endTs)) {
+                lane.container.visible = false;
+            } else {
+                lane.container.visible = true;
+                lane.container.y = nextLane++;
+                assignment[lane.id] = lane.container.y;
             }
+        });
 
-            this.timeline.worldWidth = this.spanManager.maxTime;
-            this.timeline.worldHeight = maxHeight;
+        return assignment;
+    }
 
-            let clampZoom = this.timeline.plugins['clamp-zoom'];
-            clampZoom.minHeight = maxHeight;
-            clampZoom.maxHeight = maxHeight;
-            clampZoom.maxWidth = this.spanManager.maxTime;
+    private drawViewport() {
+        if (!this.viewportDirty()) {
+            return;
+        }
 
-            let numDrawn = 0;
-            this.spanManager.listLanes().forEach(lane => {
-                lane.spans.forEach(span => {
-                    let end = span.end ? span.end : this.spanManager.maxTime;
-                    let rect = this.rectangles[span.id];
-                    if (rect === undefined) {
-                        rect = new PIXI.Graphics();
-                        this.timeline.addChild(rect);
-                        this.rectangles[span.id] = rect;
-                    }
-                    rect.clear();
-                    rect.beginFill(0x484848);
-                    rect.drawRect(
-                        span.start,
-                        lane.index,
-                        end - span.start,
-                        0.9,
+        let maxHeight = this.spanManager.numLanes();
+        if (maxHeight === 0 || this.spanManager.maxTime === 0) {
+            return;
+        }
+
+        let startTs = this.timeline.hitArea.x;
+        let endTs = startTs + this.timeline.hitArea.width;
+        let laneHeightPx = this.viewportHeight / maxHeight;
+        let tsWidthPx = this.windowWidth / this.timeline.hitArea.width;
+
+        this.axis.update(startTs, endTs);
+
+        let assignment = this.drawVisibleLanes(startTs, endTs);
+        this.drawTextOverlay(startTs, endTs, laneHeightPx, tsWidthPx, assignment);
+
+        this.saveViewport();
+    }
+
+    private drawTextOverlay(startTs, endTs, laneHeightPx, tsWidthPx, assignment) {
+        let numLabels = 0;
+        this.spanManager.listLanes().forEach(lane => {
+            lane.spans.forEach(span => {
+                let visible = span.intersects(startTs, endTs);
+                let text = this.text[span.id];
+                if (text === undefined) {
+                    let style = new PIXI.TextStyle({fill: "white"});
+                    text = new PIXI.Text(span.name, style);
+                    this.text[span.id] = text;
+                    this.textOverlay.addChild(text);
+                }
+                text.visible = visible;
+
+                if (text.mask != null) {
+                    text.mask.destroy();
+                    text.mask = null;
+                }
+
+                if (!visible) {
+                    return;
+                }
+                let scale = laneHeightPx / text.height;
+                let screenRelTs = span.start - this.timeline.hitArea.x;
+                if (screenRelTs < 0) {
+                    screenRelTs = 0;
+                }
+                let end = (span.end ? span.end : this.spanManager.maxTime)
+                    - this.timeline.hitArea.x;
+                if (end > this.timeline.hitArea.width) {
+                    end = this.timeline.hitArea.width;
+                }
+
+                let widthTs = end - screenRelTs;
+
+                if (assignment[lane.id] === undefined) {
+                    throw new Error(`Missing assignment for ${lane.id}`);
+                }
+
+                text.x = screenRelTs * tsWidthPx;
+                text.y = assignment[lane.id] * laneHeightPx;
+                text.height = text.height * scale;
+                text.width = text.width * scale;
+
+                if (text.width * scale < 25) {
+                    text.visible = false;
+                    return;
+                }
+
+                if (text.width * scale > tsWidthPx * widthTs) {
+                    let mask = new PIXI.Graphics();
+                    mask.clear();
+                    mask.beginFill(0x000000);
+                    mask.drawRect(
+                        text.x,
+                        text.y,
+                        tsWidthPx * widthTs,
+                        text.height,
                     );
-                    rect.endFill();
+                    mask.endFill();
+                    text.mask = mask;
+                }
 
-                    numDrawn += 1;
-                })
+                numLabels++;
             });
-            console.log(`Drew ${numDrawn} spans`);
-        }
+        });
+        console.log(`Drew ${numLabels} labels`);
+    }
 
-        if (this.viewportDirty()) {
-            let maxHeight = this.spanManager.numLanes();
-            if (maxHeight === 0 || this.spanManager.maxTime === 0) {
-                return;
-            }
-
-            let startTs = this.timeline.hitArea.x;
-            let endTs = startTs + this.timeline.hitArea.width;
-            let laneHeightPx = this.viewportHeight / maxHeight;
-            let tsWidthPx = this.windowWidth / this.timeline.hitArea.width;
-
-            this.axis.update(startTs, endTs);
-
-            let numLabels = 0;
-            this.spanManager.listLanes().forEach(lane => {
-                lane.spans.forEach(span => {
-                    let visible = span.intersects(startTs, endTs);
-                    let text = this.text[span.id];
-                    if (text === undefined) {
-                        let style = new PIXI.TextStyle({fill: "white"});
-                        text = new PIXI.Text(span.name, style);
-                        this.text[span.id] = text;
-                        this.textOverlay.addChild(text);
-                    }
-                    text.visible = visible;
-
-                    if (text.mask != null) {
-                        text.mask.destroy();
-                        text.mask = null;
-                    }
-
-                    if (!visible) {
-                        return;
-                    }
-                    let scale = laneHeightPx / text.height;
-                    let screenRelTs = span.start - this.timeline.hitArea.x;
-                    if (screenRelTs < 0) {
-                        screenRelTs = 0;
-                    }
-                    let end = (span.end ? span.end : this.spanManager.maxTime)
-                        - this.timeline.hitArea.x;
-                    if (end > this.timeline.hitArea.width) {
-                        end = this.timeline.hitArea.width;
-                    }
-
-                    let widthTs = end - screenRelTs;
-
-                    text.x = screenRelTs * tsWidthPx;
-                    text.y = lane.index * laneHeightPx;
-                    text.height = text.height * scale;
-                    text.width = text.width * scale;
-
-                    if (text.width * scale < 25) {
-                        text.visible = false;
-                        return;
-                    }
-
-                    if (text.width * scale > tsWidthPx * widthTs) {
-                        let mask = new PIXI.Graphics();
-                        mask.clear();
-                        mask.beginFill(0x000000);
-                        mask.drawRect(
-                            text.x,
-                            text.y,
-                            tsWidthPx * widthTs,
-                            text.height,
-                        );
-                        mask.endFill();
-                        text.mask = mask;
-                    }
-
-                    numLabels++;
-                });
-            });
-            console.log(`Drew ${numLabels} labels`);
-
-            this.saveViewport();
-        }
+    private draw() {
+        this.drawLanes();
+        this.drawViewport();
     }
 }
 
