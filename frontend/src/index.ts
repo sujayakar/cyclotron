@@ -152,6 +152,9 @@ export class Cyclotron {
             return;
         }
 
+        let endTs = this.lastViewport.ts + this.lastViewport.width;
+        let assignment = this.drawVisibleLanes(this.lastViewport.ts, endTs);
+
         let maxHeight = this.spanManager.numLanes();
         this.timeline.worldWidth = this.spanManager.maxTime;
         this.timeline.worldHeight = maxHeight;
@@ -160,9 +163,6 @@ export class Cyclotron {
         clampZoom.minHeight = maxHeight;
         clampZoom.maxHeight = maxHeight;
         clampZoom.maxWidth = this.spanManager.maxTime;
-
-        let endTs = this.lastViewport.ts + this.lastViewport.width;
-        this.drawVisibleLanes(this.lastViewport.ts, endTs);
     }
 
     private drawVisibleLanes(startTs, endTs) {
@@ -196,12 +196,11 @@ export class Cyclotron {
 
         let startTs = this.timeline.hitArea.x;
         let endTs = startTs + this.timeline.hitArea.width;
-        let laneHeightPx = this.viewportHeight / maxHeight;
-        let tsWidthPx = this.windowWidth / this.timeline.hitArea.width;
-
         this.axis.update(startTs, endTs);
 
         let assignment = this.drawVisibleLanes(startTs, endTs);
+        let laneHeightPx = this.viewportHeight / maxHeight;
+        let tsWidthPx = this.windowWidth / this.timeline.hitArea.width;
         this.drawTextOverlay(startTs, endTs, laneHeightPx, tsWidthPx, assignment);
     }
 
