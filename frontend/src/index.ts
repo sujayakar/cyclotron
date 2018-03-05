@@ -3,8 +3,6 @@ import Viewport = require("pixi-viewport");
 import { SpanManager } from "./model";
 import d3 = require("d3");
 
-const arrowColor = 0xf44336;
-
 class Axis {
     private container;
     private axis;
@@ -63,6 +61,8 @@ export class Cyclotron {
     private textOverlay;
     private arrowOverlay;
 
+    private arrowColor;
+
     constructor() {
         this.windowWidth = window.innerWidth * 0.9;
         this.windowHeight = window.innerHeight * 0.9;
@@ -112,6 +112,7 @@ export class Cyclotron {
         this.arrowOverlay.width = this.windowWidth;
         this.arrowOverlay.height = this.viewportHeight;
         this.app.stage.addChild(this.arrowOverlay);
+        this.arrowColor = 0xca271b;
 
         this.ticker = PIXI.ticker.shared;
         this.ticker.autoStart = true;
@@ -301,7 +302,7 @@ export class Cyclotron {
 
             let arrow = wakeup.arrow;
             arrow.clear();
-            arrow.lineStyle(1.5, arrowColor, 0.7);
+            arrow.lineStyle(1.5, this.arrowColor, 0.5);
             arrow.moveTo(x1, y1);
             arrow.bezierCurveTo(cX1, cY1, cX2, cY2, x2, y2);
 
@@ -310,7 +311,7 @@ export class Cyclotron {
                 arrowSize = 0.25 * (x2 - x1);
             }
             // Draw the arrow head
-            arrow.beginFill(arrowColor, 0.7);
+            arrow.beginFill(this.arrowColor, 0.5);
             arrow.drawPolygon([x2, y2,
                                x2-arrowSize, y2+arrowSize/2,
                                x2-arrowSize, y2-arrowSize/2]);
