@@ -5,12 +5,10 @@ extern crate hyper;
 extern crate serde_derive;
 extern crate websocket;
 extern crate futures;
-#[macro_use]
 extern crate failure;
 extern crate serde_json;
 
 use std::fs::{
-    self,
     File,
 };
 use std::net::{
@@ -29,7 +27,6 @@ use std::time::Duration;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use cyclotron_backend::TraceEvent;
 use failure::Error;
 use futures::{
     future,
@@ -47,13 +44,13 @@ use hyper::server::{
     Response,
     Service,
 };
-use websocket::{Message, OwnedMessage};
+use websocket::Message;
 use websocket::server::upgrade::WsUpgrade;
 use websocket::server::upgrade::sync::Buffer;
 use websocket::sync::Server;
 
 struct Inner {
-    traces_dir: PathBuf,
+    trace_path: PathBuf,
     frontend_dir: PathBuf,
 }
 
@@ -65,39 +62,15 @@ struct CyclotronServer {
 impl CyclotronServer {
     fn new(args: &Args) -> Self {
         let inner = Inner {
-            traces_dir: PathBuf::from(&args.flag_traces),
-            frontend_dir: PathBuf::from(&args.flag_frontend),
+            trace_path: PathBuf::from(&args.flag_trace),
+            frontend_dir: PathBuf::from("../frontend"),
         };
         Self { inner: Arc::new(Mutex::new(inner)) }
     }
 
-    fn serve_traces(&self) -> Response {
-        let mut response = Response::new();
-        match self._serve_traces() {
-            Ok(buf) => {
-                response.set_body(buf.into_bytes());
-            },
-            Err(e) => {
-                println!("Failed to serve traces: {:?}", e);
-                response.set_status(StatusCode::InternalServerError);
-                return response;
-            },
-        }
-        response
-    }
-
-    fn _serve_traces(&self) -> Result<String, Error> {
-        let inner = self.inner.lock().unwrap();
-        let mut buf = String::new();
-        for entry in fs::read_dir(&inner.traces_dir)? {
-            buf = (buf + entry?.file_name().to_str().unwrap()) + " ";
-        }
-        Ok(buf)
-    }
-
     fn serve_frontend(&self, p: &str) -> Response {
         let inner = self.inner.lock().unwrap();
-        let path = inner.frontend_dir.clone().join(p);
+        let path = inner.frontend_dir.clone().join(p.trim_left_matches("/"));
 
         let mut response = Response::new();
         let file = match File::open(&path) {
@@ -129,15 +102,10 @@ impl CyclotronServer {
             .map_err(|(_, e)| e)?;
         println!("New connection from {:?}", client.peer_addr()?);
 
-        let path = match client.recv_message()? {
-            OwnedMessage::Text(s) => {
-                let inner = self.inner.lock().unwrap();
-                inner.traces_dir.clone().join(s)
-            },
-            r => return Err(format_err!("Unexpected message {:?}", r).into()),
+        let mut file = {
+            let inner = self.inner.lock().unwrap();
+            BufReader::new(File::open(&inner.trace_path)?)
         };
-
-        let mut file = BufReader::new(File::open(&path)?);
 
         // First, push the whole file over the socket
         let mut fragment = loop {
@@ -194,10 +162,11 @@ impl Service for CyclotronServer {
     fn call(&self, req: Request) -> Self::Future {
         match (req.method(), req.path()) {
             (&Method::Get, "/") => {
-                Box::new(future::ok(self.serve_traces()))
+                let response = self.serve_frontend("/src/index.html");
+                Box::new(future::ok(response))
             },
-            (&Method::Get, p) if p.starts_with("/frontend/") => {
-                let response = self.serve_frontend(p.trim_left_matches("/frontend/"));
+            (&Method::Get, p) => {
+                let response = self.serve_frontend(p);
                 Box::new(future::ok(response))
             },
             _ => {
@@ -213,23 +182,21 @@ const USAGE: &'static str = "
 Cyclotron trace server.
 
 Usage:
-   cyclotron-server --http=<port> --ws=<port> --traces=<path> --frontend=<path>
+   cyclotron-server --http=<port> --ws=<port> --trace=<path>
    cyclotron-server (-h | --help)
 
 Options:
-  -h --help          Show this screen.
-  --http=<port>      Port for HTTP server
-  --ws=<port>        Port for websocket server
-  --traces=<path>    Directory of available traces
-  --frontend=<path>  Isaac's /frontend directory
+  -h --help       Show this screen.
+  --http=<port>   Port for HTTP server
+  --ws=<port>     Port for websocket server
+  --trace=<path>  Path to trace file to stream in
 ";
 
 #[derive(Debug, Deserialize)]
 struct Args {
     flag_http: u16,
     flag_ws: u16,
-    flag_traces: String,
-    flag_frontend: String,
+    flag_trace: String,
 }
 
 fn main() {

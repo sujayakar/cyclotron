@@ -1,10 +1,6 @@
-1) cd server; cargo run -- --http=3000 --ws=3001 --traces=../examples/ --frontend=../frontend/
-2) open up localhost:3000/frontend/src/index.html in browser
-
-
-= TODO =
-[ ] Create sprite group per lane, move rectangles onto lane
-[ ] Drawing lanes in viewport is 1) deciding which lanes overlap, 2) scaling them to fit, 3) hiding the others
-[ ] Then, draw text in screen space w/masks on top
-[ ] Implement collapsing by logging visibility on rectangles, hiding entire lanes if invisible
-[ ] Add arrows?
+$ git clone http://github.com/sujayakar/cyclotron
+$ cd cyclotron/frontend
+$ ./build.sh &
+$ cd ../server
+$ cargo run --release -- --http=3000 --ws=3001 --trace=../examples/empty_file_release.log
+# Open up localhost:3000 in your browser!

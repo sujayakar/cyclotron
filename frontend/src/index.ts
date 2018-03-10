@@ -25,8 +25,8 @@ class Axis {
             .domain([startTs, endTs])
             .range([0, this.windowWidth]);
 
-        this.axis.call(d3.axisBottom(axisScale).ticks(10).tickFormat(seconds => {
-            let delta = seconds - startTs;
+        this.axis.call(d3.axisBottom(axisScale).ticks(5).tickFormat(seconds => {
+            let delta = endTs - startTs;
             function formatTime(n) {
                 if (delta < 0.000001) {
                     return `${(n * 1e9).toFixed(0)}ns`;
@@ -125,7 +125,7 @@ export class Cyclotron {
         var socket = new WebSocket("ws://127.0.0.1:3001", "cyclotron-ws");
         var i = 0;
         socket.onmessage = event => { this.addEvent(JSON.parse(event.data)); };
-        socket.onopen = event => { socket.send("empty_file_release.log"); };
+        socket.onopen = event => { socket.send("cyclotron.log"); };
         socket.onerror = event => { alert(`Socket error ${event}`); };
         socket.onclose = event => { alert(`Socket closed ${event}`); };
     }
