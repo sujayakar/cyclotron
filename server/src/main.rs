@@ -70,7 +70,7 @@ impl CyclotronServer {
 
     fn serve_frontend(&self, p: &str) -> Response {
         let inner = self.inner.lock().unwrap();
-        let path = inner.frontend_dir.clone().join(p.trim_left_matches("/"));
+        let path = inner.frontend_dir.clone().join(p.trim_start_matches("/"));
 
         let mut response = Response::new();
         let file = match File::open(&path) {
@@ -157,7 +157,7 @@ impl Service for CyclotronServer {
     type Request = Request;
     type Response = Response;
     type Error = hyper::Error;
-    type Future = Box<Future<Item=Self::Response, Error=Self::Error>>;
+    type Future = Box<dyn Future<Item=Self::Response, Error=Self::Error>>;
 
     fn call(&self, req: Request) -> Self::Future {
         match (req.method(), req.path()) {

@@ -44,7 +44,7 @@ pub struct TracerState {
     pub current_span: Option<SpanId>,
     pub currently_logging_wakeup: bool,
 
-    pub writer: Option<Box<Logger>>,
+    pub writer: Option<Box<dyn Logger>>,
 
     start: Instant,
     since_epoch: Duration,
@@ -66,7 +66,7 @@ impl Default for TracerState {
 }
 
 impl TracerState {
-    pub fn start(&mut self, writer: Box<Logger>) {
+    pub fn start(&mut self, writer: Box<dyn Logger>) {
         // assert!(self.writer.is_none());
         self.writer = Some(writer);
     }
