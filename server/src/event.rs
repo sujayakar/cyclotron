@@ -116,20 +116,26 @@ pub struct EventTree {
     // what we're gonna filter for
     goal_names: HashSet<String>,
     goal_spans: HashSet<SpanId>,
+    // filter out any wakeups originating from this nobe (popular choice: Control)
+    hide_wakeups_from_names: HashSet<String>,
+    hide_wakeups_from_spans: HashSet<SpanId>,
 }
 
 impl EventTree {
-    pub fn new(goals: Vec<&str>) -> Self {
-        let mut goal_names = HashSet::new();
-        for goal in goals {
-            goal_names.insert(goal.to_string());
-        }
+    #[cfg(test)]
+    pub fn new(goals: Vec<String>) -> Self {
+        EventTree::new_hide_wakeups(goals, vec!["Control".to_string()])
+    }
+
+    pub fn new_hide_wakeups(goals: Vec<String>, hide_wakeups_from: Vec<String>) -> Self {
         EventTree {
             slab: HashMap::new(),
             roots: HashSet::new(),
             wakeups: HashSet::new(),
-            goal_names,
+            goal_names: goals.into_iter().collect(),
             goal_spans: HashSet::new(),
+            hide_wakeups_from_names: hide_wakeups_from.into_iter().collect(),
+            hide_wakeups_from_spans: HashSet::new(),
         }
     }
 
@@ -137,8 +143,11 @@ impl EventTree {
         if self.slab.contains_key(&id) {
             return Err((failure::format_err!("duplicate nobe"), buf));
         }
-        if self.goal_names.contains(&name) {
+        if self.goal_names.contains(&name) || self.goal_names.is_empty() {
             self.goal_spans.insert(id);
+        }
+        if self.hide_wakeups_from_names.contains(&name) {
+            self.hide_wakeups_from_spans.insert(id);
         }
         self.slab.insert(id, EventNobe {
             events: vec![EventResult { buf, ts }],
@@ -209,8 +218,11 @@ impl EventTree {
         for wakeup in &self.wakeups {
             // Add wakeup only if both of its endpoints are included in the result.
             if seen_ids.contains(&wakeup.waking_span) && seen_ids.contains(&wakeup.parked_span) {
-                println!("adding wakeup: {}", wakeup.event.buf);
-                result.push(wakeup.event.clone());
+                // (and if we weren't told explicitly to avoid printing it)
+                if !self.hide_wakeups_from_spans.contains(&wakeup.waking_span) {
+                    // println!("adding wakeup: {}", wakeup.event.buf);
+                    result.push(wakeup.event.clone());
+                }
             }
         }
         result.sort();
@@ -264,8 +276,8 @@ mod tests {
         format!("{{\"SyncEnd\":{{\"id\":{},\"ts\":{{\"secs\":0,\"nanos\":0}}}}}}", id)
     }
 
-    fn buf_wakeup(waking_id: usize, parked_id: usize) -> String {
-        format!("{{\"Wakeup\":{{\"waking_span\":{},\"parked_span\":{},\"ts\":{{\"secs\":0,\"nanos\":0}}}}}}", waking_id, parked_id)
+    fn buf_wakeup(waking_id: usize, parked_id: usize, ts: usize) -> String {
+        format!("{{\"Wakeup\":{{\"waking_span\":{},\"parked_span\":{},\"ts\":{{\"secs\":0,\"nanos\":{}}}}}}}", waking_id, parked_id, ts)
     }
 
     #[test]
@@ -280,8 +292,19 @@ mod tests {
     }
 
     #[test]
+    fn test_event_tree_no_goals_no_problem() {
+        let mut tree = EventTree::new(vec![]);
+        let mut root_id = 0;
+        for name in &["John", "Paul", "George", "Ringo"] {
+            tree.add(buf_thread_start(name, root_id)).expect("add");
+            root_id += 1;
+        }
+        assert_eq!(tree.filter().len(), 4);
+    }
+
+    #[test]
     fn test_event_child_basic() {
-        let mut tree = EventTree::new(vec!["Graydon"]);
+        let mut tree = EventTree::new(vec!["Graydon".to_string()]);
         tree.add(buf_thread_start("Graydon", 0)).expect("add root");
         tree.add(buf_sync_start("Niko", 1, 0)).expect("add child");
         tree.add(buf_sync_start("Patrick", 2, 0)).expect("add child");
@@ -290,7 +313,7 @@ mod tests {
 
     #[test]
     fn test_event_parent_basic() {
-        let mut tree = EventTree::new(vec!["Niko"]);
+        let mut tree = EventTree::new(vec!["Niko".to_string()]);
         tree.add(buf_thread_start("Graydon", 0)).expect("add root");
         tree.add(buf_sync_start("Niko", 1, 0)).expect("add child");
         tree.add(buf_sync_start("Patrick", 2, 0)).expect("add child");
@@ -299,7 +322,7 @@ mod tests {
 
     #[test]
     fn test_event_not_include_duplicates() {
-        let mut tree = EventTree::new(vec!["Niko", "Patrick"]);
+        let mut tree = EventTree::new(vec!["Niko".to_string(), "Patrick".to_string()]);
         tree.add(buf_thread_start("Graydon", 0)).expect("add root");
         tree.add(buf_sync_start("Niko", 1, 0)).expect("add child");
         tree.add(buf_sync_start("Patrick", 2, 0)).expect("add child");
@@ -308,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_event_include_end_span() {
-        let mut tree = EventTree::new(vec!["Niko"]);
+        let mut tree = EventTree::new(vec!["Niko".to_string()]);
         tree.add(buf_thread_start("Graydon", 0)).expect("add root");
         tree.add(buf_sync_start("Niko", 1, 0)).expect("add child");
         tree.add(buf_sync_start("Patrick", 2, 0)).expect("add child");
@@ -318,22 +341,23 @@ mod tests {
     }
 
     #[test]
-    fn test_event_wakeup_included() {
-        let mut tree = EventTree::new(vec!["Niko"]);
+    fn test_event_wakeups() {
+        let mut tree = EventTree::new_hide_wakeups(vec!["Niko".to_string()], vec!["Graydon".to_string()]);
         tree.add(buf_thread_start("Graydon", 0)).expect("add root");
         tree.add(buf_sync_start("Niko", 1, 0)).expect("add child");
         tree.add(buf_sync_start("Patrick", 2, 0)).expect("add child");
-        tree.add(buf_wakeup(0, 1)).expect("add wakeup");
-        assert_eq!(tree.filter().len(), 3);
-    }
-
-    #[test]
-    fn test_event_wakeup_not_included() {
-        let mut tree = EventTree::new(vec!["Niko"]);
-        tree.add(buf_thread_start("Graydon", 0)).expect("add root");
-        tree.add(buf_sync_start("Niko", 1, 0)).expect("add child");
-        tree.add(buf_sync_start("Patrick", 2, 0)).expect("add child");
-        tree.add(buf_wakeup(2, 1)).expect("add wakeup");
-        assert_eq!(tree.filter().len(), 2);
+        // include these
+        for ts in 0..20 {
+            tree.add(buf_wakeup(1, 0, ts)).expect("add wakeup");
+        }
+        // don't include these - patrick not in goals
+        for ts in 0..40 {
+            tree.add(buf_wakeup(1, 2, ts)).expect("add wakeup");
+        }
+        // don't include these - hiding wakeup from graydon
+        for ts in 0..80 {
+            tree.add(buf_wakeup(0, 1, ts)).expect("add wakeup");
+        }
+        assert_eq!(tree.filter().len(), 22);
     }
 }

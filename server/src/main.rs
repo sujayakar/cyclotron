@@ -55,6 +55,8 @@ use websocket::sync::Server;
 struct Inner {
     trace_path: PathBuf,
     frontend_dir: PathBuf,
+    grep_goals: Vec<String>,
+    hide_wakeups_from: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -67,6 +69,8 @@ impl CyclotronServer {
         let inner = Inner {
             trace_path: PathBuf::from(&args.flag_trace),
             frontend_dir: PathBuf::from("../frontend"),
+            grep_goals: args.flag_grep.clone(),
+            hide_wakeups_from: args.flag_hide_wakeups.clone(),
         };
         Self { inner: Arc::new(Mutex::new(inner)) }
     }
@@ -105,14 +109,14 @@ impl CyclotronServer {
             .map_err(|(_, e)| e)?;
         println!("New connection from {:?}", client.peer_addr()?);
 
-        let mut file = {
+        let (mut file, grep_goals, hide_wakeups_from) = {
             let inner = self.inner.lock().unwrap();
-            BufReader::new(File::open(&inner.trace_path)?)
+            let file = BufReader::new(File::open(&inner.trace_path)?);
+            (file, inner.grep_goals.clone(), inner.hide_wakeups_from.clone())
         };
 
         // First, push the whole file over the socket
-        // TODO: expose argument through args
-        let mut evence = EventTree::new(vec!["PreLocalWorker","ProtocolWorker"]);
+        let mut evence = EventTree::new_hide_wakeups(grep_goals, hide_wakeups_from);
         let mut fragment = loop {
             let mut buf = String::new();
             let num_read = file.read_line(&mut buf)?;
@@ -194,14 +198,16 @@ const USAGE: &'static str = "
 Cyclotron trace server.
 
 Usage:
-   cyclotron-server --http=<port> --ws=<port> --trace=<path>
+   cyclotron-server --http=<port> --ws=<port> --trace=<path> [--grep=<name>...] [--hide-wakeups=<name>...]
    cyclotron-server (-h | --help)
 
 Options:
-  -h --help       Show this screen.
-  --http=<port>   Port for HTTP server
-  --ws=<port>     Port for websocket server
-  --trace=<path>  Path to trace file to stream in
+  -h --help              Show this screen.
+  --http=<port>          Port for HTTP server
+  --ws=<port>            Port for websocket server
+  --trace=<path>         Path to trace file to stream in
+  --grep=<name>          Show only these futures (& their descendants+ancestors)
+  --hide-wakeups=<name>  Hide wakeup arrows originating from these futures
 ";
 
 #[derive(Debug, Deserialize)]
@@ -209,6 +215,8 @@ struct Args {
     flag_http: u16,
     flag_ws: u16,
     flag_trace: String,
+    flag_grep: Vec<String>,
+    flag_hide_wakeups: Vec<String>,
 }
 
 fn main() {
