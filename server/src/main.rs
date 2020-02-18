@@ -8,6 +8,9 @@ extern crate futures;
 extern crate failure;
 extern crate serde_json;
 
+mod event;
+use event::EventTree;
+
 use std::fs::{
     File,
 };
@@ -108,6 +111,8 @@ impl CyclotronServer {
         };
 
         // First, push the whole file over the socket
+        // TODO: expose argument through args
+        let mut evence = EventTree::new(vec!["PreLocalWorker","ProtocolWorker"]);
         let mut fragment = loop {
             let mut buf = String::new();
             let num_read = file.read_line(&mut buf)?;
@@ -116,11 +121,17 @@ impl CyclotronServer {
                 break buf;
             } else {
                 buf.pop();
-                // let event: TraceEvent = serde_json::from_str(&buf)?;
-                // println!("Read {:?}", event);
-                client.send_message(&Message::text(buf.as_str()))?;
+                if let Err((e, buf)) = evence.add(buf) {
+                    println!("warning: couldn't process event '{}': {:?}", buf, e);
+                }
             }
         };
+
+        for event in evence.filter() {
+            //let x: TraceEvent = serde_json::from_str(&event)?;
+            //println!("Read {:?}", x);
+            client.send_message(&Message::text(event))?;
+        }
 
         loop {
             let num_read = file.read_line(&mut fragment)?;
@@ -130,6 +141,7 @@ impl CyclotronServer {
                 thread::sleep(Duration::from_millis(250));
                 continue;
             }
+            panic!("streaming not supported yet");
 
             fragment.pop();
             // let event: TraceEvent = serde_json::from_str(&fragment)?;
