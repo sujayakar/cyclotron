@@ -145,14 +145,18 @@ impl CyclotronServer {
                 thread::sleep(Duration::from_millis(250));
                 continue;
             }
+            // TODO allow on-the-fly filtering and reenable this feature
             panic!("streaming not supported yet");
 
-            fragment.pop();
-            // let event: TraceEvent = serde_json::from_str(&fragment)?;
-            // println!("Read {:?}", event);
-            client.send_message(&Message::text(fragment.as_str()))?;
+            #[allow(unreachable_code)]
+            {
+                fragment.pop();
+                // let event: TraceEvent = serde_json::from_str(&fragment)?;
+                // println!("Read {:?}", event);
+                client.send_message(&Message::text(fragment.as_str()))?;
 
-            fragment.clear();
+                fragment.clear();
+            }
         }
 
     }
