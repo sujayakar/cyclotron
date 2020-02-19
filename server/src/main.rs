@@ -116,7 +116,7 @@ impl CyclotronServer {
         };
 
         // First, push the whole file over the socket
-        let mut evence = EventTree::new_hide_wakeups(grep_goals, hide_wakeups_from);
+        let mut events = EventTree::new_hide_wakeups(grep_goals, hide_wakeups_from);
         let mut fragment = loop {
             let mut buf = String::new();
             let num_read = file.read_line(&mut buf)?;
@@ -125,13 +125,13 @@ impl CyclotronServer {
                 break buf;
             } else {
                 buf.pop();
-                if let Err((e, buf)) = evence.add(buf) {
+                if let Err((e, buf)) = events.add(buf) {
                     println!("warning: couldn't process event '{}': {:?}", buf, e);
                 }
             }
         };
 
-        for event in evence.filter() {
+        for event in events.filter() {
             //let x: TraceEvent = serde_json::from_str(&event)?;
             //println!("Read {:?}", x);
             client.send_message(&Message::text(event))?;

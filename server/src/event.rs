@@ -94,7 +94,7 @@ impl PartialEq for EventResult {
 }
 
 #[derive(Clone)]
-struct EventNobe {
+struct EventNode {
     events: Vec<EventResult>,
     name: String,
     parent: Option<SpanId>,
@@ -109,14 +109,14 @@ struct Wakeup {
 }
 
 pub struct EventTree {
-    slab: HashMap<SpanId, EventNobe>,
+    slab: HashMap<SpanId, EventNode>,
     roots: HashSet<SpanId>,
     // emit these in postprocessing, if both nodes are in the tree
     wakeups: HashSet<Wakeup>,
     // what we're gonna filter for
     goal_names: HashSet<String>,
     goal_spans: HashSet<SpanId>,
-    // filter out any wakeups originating from this nobe (popular choice: Control)
+    // filter out any wakeups originating from this node (popular choice: Control)
     hide_wakeups_from_names: HashSet<String>,
     hide_wakeups_from_spans: HashSet<SpanId>,
 }
@@ -139,9 +139,9 @@ impl EventTree {
         }
     }
 
-    fn add_nobe(&mut self, id: SpanId, buf: String, name: String, ts: Duration, parent: Option<SpanId>) -> Result<(), (failure::Error, String)> {
+    fn add_node(&mut self, id: SpanId, buf: String, name: String, ts: Duration, parent: Option<SpanId>) -> Result<(), (failure::Error, String)> {
         if self.slab.contains_key(&id) {
-            return Err((failure::format_err!("duplicate nobe"), buf));
+            return Err((failure::format_err!("duplicate node"), buf));
         }
         if self.goal_names.contains(&name) || self.goal_names.is_empty() {
             self.goal_spans.insert(id);
@@ -149,7 +149,7 @@ impl EventTree {
         if self.hide_wakeups_from_names.contains(&name) {
             self.hide_wakeups_from_spans.insert(id);
         }
-        self.slab.insert(id, EventNobe {
+        self.slab.insert(id, EventNode {
             events: vec![EventResult { buf, ts }],
             name,
             parent,
@@ -166,32 +166,32 @@ impl EventTree {
         match event {
             // Add new root.
             TraceEvent::ThreadStart { id, name, ts, .. } => {
-                self.add_nobe(id, buf, name, ts, None)?;
+                self.add_node(id, buf, name, ts, None)?;
                 self.roots.insert(id);
             }
 
-            // Add new nobe with a parent.
+            // Add new node with a parent.
             TraceEvent::AsyncStart { id, parent_id, name, ts, .. }
             | TraceEvent::SyncStart { id, parent_id, name, ts, .. } => {
-                assert!(!self.slab.contains_key(&id), "duplicate nobe");
-                if let Some(parent_nobe) = self.slab.get_mut(&parent_id) {
-                    parent_nobe.children.push(id);
-                    self.add_nobe(id, buf, name, ts, Some(parent_id))?;
+                assert!(!self.slab.contains_key(&id), "duplicate node");
+                if let Some(parent_node) = self.slab.get_mut(&parent_id) {
+                    parent_node.children.push(id);
+                    self.add_node(id, buf, name, ts, Some(parent_id))?;
                 } else {
-                    println!("warning: parentless nobe {:?} (alleged parent: {:?}); treating as root", id, parent_id);
-                    self.add_nobe(id, buf, name, ts, None)?;
+                    println!("warning: parentless node {:?} (alleged parent: {:?}); treating as root", id, parent_id);
+                    self.add_node(id, buf, name, ts, None)?;
                     self.roots.insert(id);
                 }
             },
 
-            // Add event to existing nobe in the tree.
+            // Add event to existing node in the tree.
             TraceEvent::AsyncOnCPU { id, ts, .. }
             | TraceEvent::AsyncOffCPU { id, ts, .. }
             | TraceEvent::AsyncEnd { id, ts, .. }
             | TraceEvent::SyncEnd { id, ts, .. }
             | TraceEvent::ThreadEnd { id, ts, .. } => {
-                let nobe = self.slab.get_mut(&id).expect("nobeless event");
-                nobe.events.push(EventResult { buf, ts });
+                let node = self.slab.get_mut(&id).expect("nodeless event");
+                node.events.push(EventResult { buf, ts });
             }
 
             // Add new wakeup.
@@ -203,14 +203,14 @@ impl EventTree {
     }
 
     // TODO: be able to do this filter in-line
-    // Guaranteed to return in root-first order (parence before children), and wakeups last, i guess.
+    // Guaranteed to return in root-first order (parents before children), and wakeups last, i guess.
     pub fn filter(&self) -> Vec<String> {
         let mut seen_ids = HashSet::new();
         let mut result = vec![];
         for id in &self.goal_spans {
-            let nobe = self.slab.get(id).expect("this nobe missing during filter");
-            // Process this nobe's ancestors.
-            self.add_ancestors(&mut seen_ids, &mut result, nobe.parent);
+            let node = self.slab.get(id).expect("this node missing during filter");
+            // Process this node's ancestors.
+            self.add_ancestors(&mut seen_ids, &mut result, node.parent);
             // Add all its children, and children's children, and so on.
             // NB this includes adding the node itself
             self.add_children(&mut seen_ids, &mut result, *id);
@@ -232,12 +232,12 @@ impl EventTree {
     fn add_ancestors(&self, seen_ids: &mut HashSet<SpanId>, result: &mut Vec<EventResult>, ancestor_id: Option<SpanId>) {
         if let Some(id) = ancestor_id {
             if !seen_ids.contains(&id) {
-                let nobe = self.slab.get(&id).expect("ancestor nobe missing");
-                //println!("adding {} evence from nobe named '{}'", nobe.events.len(), nobe.name);
+                let node = self.slab.get(&id).expect("ancestor node missing");
+                //println!("adding {} events from node named '{}'", node.events.len(), node.name);
                 seen_ids.insert(id);
                 // Add after iterating, to ensure parent-first order.
-                self.add_ancestors(seen_ids, result, nobe.parent);
-                for event in &nobe.events {
+                self.add_ancestors(seen_ids, result, node.parent);
+                for event in &node.events {
                     result.push(event.clone());
                 }
             }
@@ -247,13 +247,13 @@ impl EventTree {
     fn add_children(&self, seen_ids: &mut HashSet<SpanId>, result: &mut Vec<EventResult>, id: SpanId) {
         if !seen_ids.contains(&id) {
             // Add before iterating, to ensure parent-first order.
-            let nobe = self.slab.get(&id).expect("child nobe missing");
-            //println!("adding {} evence from nobe named '{}'", nobe.events.len(), nobe.name);
+            let node = self.slab.get(&id).expect("child node missing");
+            //println!("adding {} events from node named '{}'", node.events.len(), node.name);
             seen_ids.insert(id);
-            for event in &nobe.events {
+            for event in &node.events {
                 result.push(event.clone());
             }
-            for child in &nobe.children {
+            for child in &node.children {
                 self.add_children(seen_ids, result, *child);
             }
         }
