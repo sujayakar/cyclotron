@@ -7,7 +7,7 @@ pub struct TracedThread {
 }
 
 impl TracedThread {
-    pub fn new<S: Into<String>>(name: S, writer: Box<Logger>) -> Self {
+    pub fn new<S: Into<String>>(name: S, writer: Box<dyn Logger>) -> Self {
         TRACER_STATE.with(|c| {
             let mut st = c.borrow_mut();
             st.start(writer);

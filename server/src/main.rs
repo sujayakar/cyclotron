@@ -8,6 +8,9 @@ extern crate futures;
 extern crate failure;
 extern crate serde_json;
 
+mod event;
+use event::EventTree;
+
 use std::fs::{
     File,
 };
@@ -52,6 +55,8 @@ use websocket::sync::Server;
 struct Inner {
     trace_path: PathBuf,
     frontend_dir: PathBuf,
+    grep_goals: Vec<String>,
+    hide_wakeups_from: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -64,13 +69,15 @@ impl CyclotronServer {
         let inner = Inner {
             trace_path: PathBuf::from(&args.flag_trace),
             frontend_dir: PathBuf::from("../frontend"),
+            grep_goals: args.flag_grep.clone(),
+            hide_wakeups_from: args.flag_hide_wakeups.clone(),
         };
         Self { inner: Arc::new(Mutex::new(inner)) }
     }
 
     fn serve_frontend(&self, p: &str) -> Response {
         let inner = self.inner.lock().unwrap();
-        let path = inner.frontend_dir.clone().join(p.trim_left_matches("/"));
+        let path = inner.frontend_dir.clone().join(p.trim_start_matches("/"));
 
         let mut response = Response::new();
         let file = match File::open(&path) {
@@ -102,12 +109,14 @@ impl CyclotronServer {
             .map_err(|(_, e)| e)?;
         println!("New connection from {:?}", client.peer_addr()?);
 
-        let mut file = {
+        let (mut file, grep_goals, hide_wakeups_from) = {
             let inner = self.inner.lock().unwrap();
-            BufReader::new(File::open(&inner.trace_path)?)
+            let file = BufReader::new(File::open(&inner.trace_path)?);
+            (file, inner.grep_goals.clone(), inner.hide_wakeups_from.clone())
         };
 
         // First, push the whole file over the socket
+        let mut events = EventTree::new_hide_wakeups(grep_goals, hide_wakeups_from);
         let mut fragment = loop {
             let mut buf = String::new();
             let num_read = file.read_line(&mut buf)?;
@@ -116,11 +125,17 @@ impl CyclotronServer {
                 break buf;
             } else {
                 buf.pop();
-                // let event: TraceEvent = serde_json::from_str(&buf)?;
-                // println!("Read {:?}", event);
-                client.send_message(&Message::text(buf.as_str()))?;
+                if let Err((e, buf)) = events.add(buf) {
+                    println!("warning: couldn't process event '{}': {:?}", buf, e);
+                }
             }
         };
+
+        for event in events.filter() {
+            //let x: TraceEvent = serde_json::from_str(&event)?;
+            //println!("Read {:?}", x);
+            client.send_message(&Message::text(event))?;
+        }
 
         loop {
             let num_read = file.read_line(&mut fragment)?;
@@ -130,13 +145,18 @@ impl CyclotronServer {
                 thread::sleep(Duration::from_millis(250));
                 continue;
             }
+            // TODO allow on-the-fly filtering and reenable this feature
+            panic!("streaming not supported yet");
 
-            fragment.pop();
-            // let event: TraceEvent = serde_json::from_str(&fragment)?;
-            // println!("Read {:?}", event);
-            client.send_message(&Message::text(fragment.as_str()))?;
+            #[allow(unreachable_code)]
+            {
+                fragment.pop();
+                // let event: TraceEvent = serde_json::from_str(&fragment)?;
+                // println!("Read {:?}", event);
+                client.send_message(&Message::text(fragment.as_str()))?;
 
-            fragment.clear();
+                fragment.clear();
+            }
         }
 
     }
@@ -157,7 +177,7 @@ impl Service for CyclotronServer {
     type Request = Request;
     type Response = Response;
     type Error = hyper::Error;
-    type Future = Box<Future<Item=Self::Response, Error=Self::Error>>;
+    type Future = Box<dyn Future<Item=Self::Response, Error=Self::Error>>;
 
     fn call(&self, req: Request) -> Self::Future {
         match (req.method(), req.path()) {
@@ -182,14 +202,16 @@ const USAGE: &'static str = "
 Cyclotron trace server.
 
 Usage:
-   cyclotron-server --http=<port> --ws=<port> --trace=<path>
+   cyclotron-server --http=<port> --ws=<port> --trace=<path> [--grep=<name>...] [--hide-wakeups=<name>...]
    cyclotron-server (-h | --help)
 
 Options:
-  -h --help       Show this screen.
-  --http=<port>   Port for HTTP server
-  --ws=<port>     Port for websocket server
-  --trace=<path>  Path to trace file to stream in
+  -h --help              Show this screen.
+  --http=<port>          Port for HTTP server
+  --ws=<port>            Port for websocket server
+  --trace=<path>         Path to trace file to stream in
+  --grep=<name>          Show only these futures (& their descendants+ancestors)
+  --hide-wakeups=<name>  Hide wakeup arrows originating from these futures
 ";
 
 #[derive(Debug, Deserialize)]
@@ -197,6 +219,8 @@ struct Args {
     flag_http: u16,
     flag_ws: u16,
     flag_trace: String,
+    flag_grep: Vec<String>,
+    flag_hide_wakeups: Vec<String>,
 }
 
 fn main() {
