@@ -250,13 +250,13 @@ fn main() {
 
     let mut verts = Vec::new();
     let mut tris = Vec::<u32>::new();
-    for (a, b) in spans {
+    for (a, b) in &spans {
         let s = verts.len() as u32;
         tris.extend(&[s, s+1, s+2, s+1, s+2, s+3]);
-        verts.push(Vertex { position: [(a as f32) / 1_000_000_000.0, 0.0] });
-        verts.push(Vertex { position: [(b as f32) / 1_000_000_000.0, 0.0] });
-        verts.push(Vertex { position: [(a as f32) / 1_000_000_000.0, 1.0] });
-        verts.push(Vertex { position: [(b as f32) / 1_000_000_000.0, 1.0] });
+        verts.push(Vertex { position: [(*a as f32) / 1_000_000_000.0, 0.0] });
+        verts.push(Vertex { position: [(*b as f32) / 1_000_000_000.0, 0.0] });
+        verts.push(Vertex { position: [(*a as f32) / 1_000_000_000.0, 1.0] });
+        verts.push(Vertex { position: [(*b as f32) / 1_000_000_000.0, 1.0] });
     }
 
     let vertex_buf = VertexBuffer::new(&display, &verts).unwrap();
@@ -274,9 +274,10 @@ fn main() {
 
     let fragment_shader_src = r#"
         #version 140
+        uniform vec4 item_color;
         out vec4 color;
         void main() {
-            color = vec4(1.0, 0.0, 0.0, 1.0);
+            color = item_color;
         }
     "#;
 
@@ -290,6 +291,7 @@ fn main() {
     };
     let mut offset = -(max_time - min_time) / 2.0;
 
+    let mut selection: Option<usize> = None;
     let mut frame_count = 0;
     let begin = Instant::now();
 
@@ -303,6 +305,52 @@ fn main() {
                     *control_flow = glutin::event_loop::ControlFlow::Exit;
                     return;
                 },
+                glutin::event::WindowEvent::CursorMoved { position, .. } => {
+                    let dims = display.get_framebuffer_dimensions();
+                    let logical_y = (position.y / dims.1 as f64) * 2.0 - 1.0;
+
+                    let pixel_x = position.x as i32;
+
+                    let scale = scale.eval();
+
+                    let to_pixel_coord = |c: u64| {
+                        let log = ((c as f32 / 1_000_000_000.0) + offset) * scale;
+                        let pix = (log + 1.0) / 2.0 * (dims.0 as f32);
+                        if pix >= 0.0 {
+                            pix as i32
+                        } else {
+                            -10
+                        }
+                    };
+
+                    selection = if logical_y >= -0.25 && logical_y <= 0.25 {
+                        let min = match spans.binary_search_by_key(
+                            &pixel_x, |s| to_pixel_coord(s.0))
+                        {
+                            Ok(x) => x,
+                            Err(x) => x.saturating_sub(1),
+                        };
+
+                        let mut selected_index = None;
+
+                        for i in min..spans.len() {
+                            let begin = to_pixel_coord(spans[i].0);
+                            let end = to_pixel_coord(spans[i].1);
+                            if begin <= pixel_x && end >= pixel_x {
+                                selected_index = Some(i);
+                                break;
+                            } else if begin > pixel_x {
+                                break;
+                            }
+                        }
+
+                        selected_index
+                    } else {
+                        None
+                    };
+
+                    println!("{:?}", selection);
+                }
                 _ => return,
             },
             glutin::event::Event::NewEvents(cause) => match cause {
@@ -360,7 +408,7 @@ fn main() {
 
         let params = glium::DrawParameters {
             depth: glium::Depth {
-                test: DepthTest::IfLess,
+                test: DepthTest::Overwrite,
                 write: true,
                 .. Default::default()
             },
@@ -368,8 +416,16 @@ fn main() {
         };
 
         target.draw(&vertex_buf, &index_buf, &program,
-                    &uniform! { scale: scale_vec, offset: offset_vec },
+                    &uniform! { scale: scale_vec, offset: offset_vec, item_color: [0.0f32, 0.0, 0.0, 1.0] },
                     &params).unwrap();
+
+        if let Some(selection) = selection {
+            let selection_index_buf = index_buf.slice(6*selection .. 6*(selection + 1)).unwrap();
+            target.draw(&vertex_buf, &selection_index_buf, &program,
+                        &uniform! { scale: scale_vec, offset: offset_vec, item_color: [1.0f32, 0.0, 0.0, 1.0] },
+                        &params).unwrap();
+        }
+
         target.finish().unwrap();
     });
 }
