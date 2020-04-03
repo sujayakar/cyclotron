@@ -2,6 +2,7 @@ use glium::{
     glutin,
     Surface,
     Display,
+    Frame,
     implement_vertex,
     uniform,
     index::{
@@ -70,13 +71,170 @@ struct Vertex {
 implement_vertex!(Vertex, position);
 
 struct LaneBuilder {
+    spans: Vec<Span>,
+}
 
+impl LaneBuilder {
+    fn new() -> LaneBuilder {
+        LaneBuilder {
+            spans: Vec::new(),
+        }
+    }
+
+    fn try_add(&mut self, span: Span) -> bool {
+        let min = match self.spans.binary_search_by_key(&span.begin, |s| s.begin) {
+            Ok(v) => v,
+            Err(v) => v.saturating_sub(1),
+        };
+
+        for i in min..self.spans.len() {
+            let s = self.spans[i];
+            if s.begin >= span.end {
+                break;
+            }
+            if s.end > span.begin {
+                return false;
+            }
+        }
+
+        if let Some(last) = self.spans.last() {
+            assert!(last.begin <= span.begin);
+        }
+        self.spans.push(span);
+
+        true
+    }
+
+    fn build(self, display: &Display) -> Lane {
+        Lane::new(display, self.spans)
+    }
+}
+
+struct ViewBuilder {
+    lanes: Vec<LaneBuilder>,
+}
+
+impl ViewBuilder {
+    fn new() -> ViewBuilder {
+        ViewBuilder {
+            lanes: Vec::new(),
+        }
+    }
+
+    fn add(&mut self, span: Span) {
+        for lane in self.lanes.iter_mut() {
+            if lane.try_add(span) {
+                return;
+            }
+        }
+
+        let mut lane = LaneBuilder::new();
+        assert!(lane.try_add(span));
+        self.lanes.push(lane);
+    }
+
+    fn build(self, display: &Display) -> View {
+        View {
+            plain_rect: build_rect(display),
+            lanes: self.lanes.into_iter().map(|l| l.build(display)).collect(),
+            highlight_lane: None,
+        }
+    }
+}
+
+fn build_rect(display: &Display) -> VertexBuffer<Vertex> {
+    VertexBuffer::new(display, &[
+        Vertex { position: [0.0, 0.0] },
+        Vertex { position: [1.0, 0.0] },
+        Vertex { position: [0.0, 1.0] },
+        Vertex { position: [1.0, 1.0] },
+    ]).unwrap()
+}
+
+struct View {
+    plain_rect: VertexBuffer<Vertex>,
+    lanes: Vec<Lane>,
+    highlight_lane: Option<usize>,
+}
+
+impl View {
+    fn new(display: &Display, mut spans: Vec<Span>) -> View {
+        spans.sort();
+        let mut b = ViewBuilder::new();
+        for span in spans {
+            b.add(span);
+        }
+        b.build(display)
+    }
+
+    fn hover(&mut self, pixel_coord: (i32, i32), display: (i32, i32), scale_offset: &ScaleOffset) {
+        let scale = scale_offset.scale();
+        let offset = scale_offset.offset();
+
+        self.highlight_lane = None;
+
+        let lanes_len = self.lanes.len();
+        for (i, lane) in self.lanes.iter_mut().enumerate() {
+            let pixel_begin = (i + 1) as f32 / (lanes_len + 2) as f32 * display.1 as f32;
+            let pixel_end = (i + 2) as f32 / (lanes_len + 2) as f32 * display.1 as f32;
+
+            if pixel_coord.1 as f32 >= pixel_begin && (pixel_coord.1 as f32) < pixel_end {
+                self.highlight_lane = Some(i);
+                println!("hover {} {} {} {}", pixel_coord.1, display.1, pixel_begin, pixel_end);
+            }
+        }
+    }
+
+    fn draw(&self, program: &glium::Program, target: &mut Frame, scale_offset: &ScaleOffset) {
+        let scale = scale_offset.scale();
+        let offset = scale_offset.offset();
+
+        let params = glium::DrawParameters {
+            depth: glium::Depth {
+                test: DepthTest::Overwrite,
+                write: true,
+                .. Default::default()
+            },
+            .. Default::default()
+        };
+
+        // let offset_vec: [f32; 2] = [0.0, 0.5];
+        // let scale_vec: [f32; 2] = [1.0, 0.5];
+
+        // target.draw(&self.plain_rect, glium::index::NoIndices(PrimitiveType::TriangleStrip), &program,
+        //     &uniform! { scale: scale_vec, offset: offset_vec, item_color: [0.9f32, 0.9, 0.9, 1.0] },
+        //     &params).unwrap();
+
+        for (i, lane) in self.lanes.iter().enumerate() {
+            let color = hsl_to_rgb(i as f32 / self.lanes.len() as f32, 0.5, 0.2);
+
+            let vert_scale = 1.0 / (self.lanes.len() + 2) as f32;
+            let vert_offset = (i + 1) as f32;
+
+            if Some(i) == self.highlight_lane {
+                let offset_vec: [f32; 2] = [0.0, vert_offset];
+                let scale_vec: [f32; 2] = [1.0, vert_scale];
+
+                target.draw(&self.plain_rect, glium::index::NoIndices(PrimitiveType::TriangleStrip), &program,
+                    &uniform! { scale: scale_vec, offset: offset_vec, item_color: [0.9f32, 0.9, 0.9, 1.0] },
+                    &params).unwrap();
+            }
+
+            let offset_vec: [f32; 2] = [offset, vert_offset];
+            let scale_vec: [f32; 2] = [scale, vert_scale];
+
+            target.draw(&lane.vertex, &lane.index, &program,
+                        &uniform! { scale: scale_vec, offset: offset_vec, item_color: [color.0, color.1, color.2, 1.0] },
+                        &params).unwrap();
+        }
+    }
 }
 
 struct Lane {
     spans: Vec<Span>,
     vertex: VertexBuffer<Vertex>,
     index: IndexBuffer<u32>,
+    selected: Vec<(usize, [f32; 4])>,
 }
 
 impl Lane {
@@ -100,30 +258,82 @@ impl Lane {
             spans,
             vertex,
             index,
+            selected: Vec::new(),
         }
     }
 }
 
-struct Scale {
+struct ScaleOffset {
+    offset: f32,
     min_time: f32,
     max_time: f32,
-    setting: f32,
+    scale_setting: f32,
 }
 
-impl Scale {
-    fn eval(&self) -> f32 {
-        let scale_base = 2.0 / (self.max_time - self.min_time);
-
-        scale_base + self.setting.powf(2.0)*5000.0
+impl ScaleOffset {
+    fn new(min_time: f32, max_time: f32) -> ScaleOffset {
+        ScaleOffset {
+            offset: -min_time,
+            min_time,
+            max_time,
+            scale_setting: 0.0,
+        }
     }
 
-    fn scroll(&mut self, delta: f32) {
-        self.setting += delta / 10000.0;
-        if self.setting < 0.0 {
-            self.setting = 0.0;
+    fn offset(&self) -> f32 {
+        self.offset
+    }
+
+    fn scale(&self) -> f32 {
+        let scale_base = 1.0 / (self.max_time - self.min_time);
+
+        scale_base + self.scale_setting.powf(2.0)*5000.0
+    }
+
+    fn scroll(&mut self, offset_scroll: f32, scale_scroll: f32, ptr_loc: f32) {
+        // original_pos = (origin + offset0) * scale0
+        // final_pos = (origin + offset0 + fixup) * scale1
+
+        // (origin + offset0) * scale0 = (origin + offset0 + fixup) * scale1
+        // (origin + offset0) * (scale0 / scale1 - 1) = fixup
+
+        let scale_orig = self.scale();
+        let origin = ptr_loc / scale_orig - self.offset;
+
+        self.scale_setting += scale_scroll / 10000.0;
+        if self.scale_setting < 0.0 {
+            self.scale_setting = 0.0;
         }
-        if self.setting > 1.0 {
-            self.setting = 1.0;
+        if self.scale_setting > 1.0 {
+            self.scale_setting = 1.0;
+        }
+
+        let scale = self.scale();
+
+        let fixup = (origin + self.offset) * (scale_orig / scale - 1.0);
+
+        let offset_delta = offset_scroll / scale / 1000.0;
+
+        self.offset += offset_delta + fixup;
+
+        // left edge of screen:
+        // 0 == (min_time + offset)*scale
+        // - min_time == offset
+
+        // right edge of screen:
+        // 1 == (max_time + offset)*scale
+        // 1/scale - max_time == offset
+
+        let a = -self.min_time;
+        let b = 1.0 / scale - self.max_time;
+        let (offset_min, offset_max) = if a < b { (a, b) } else { (b, a) };
+
+        if self.offset < offset_min {
+            self.offset = offset_min;
+        }
+
+        if self.offset > offset_max {
+            self.offset = offset_max;
         }
     }
 }
@@ -171,15 +381,16 @@ fn main() {
                     nanos: ts.as_nanos() as u64,
                     metadata: Some(serde_json::to_string(&metadata).unwrap()),
                 }),
-                JsonTraceEvent::ThreadStart { id, ts, name } => events.push(TraceEvent {
-                    id,
-                    end: WhichEnd::Begin,
-                    kind: TraceKind::Thread,
-                    parent: None,
-                    name: Some(name),
-                    nanos: ts.as_nanos() as u64,
-                    metadata: None,
-                }),
+                JsonTraceEvent::ThreadStart { id, ts, name } => {}
+                // JsonTraceEvent::ThreadStart { id, ts, name } => events.push(TraceEvent {
+                //     id,
+                //     end: WhichEnd::Begin,
+                //     kind: TraceKind::Thread,
+                //     parent: None,
+                //     name: Some(name),
+                //     nanos: ts.as_nanos() as u64,
+                //     metadata: None,
+                // }),
                 JsonTraceEvent::AsyncOffCPU { id, ts,  } => events.push(TraceEvent {
                     id,
                     end: WhichEnd::End,
@@ -207,15 +418,16 @@ fn main() {
                     nanos: ts.as_nanos() as u64,
                     metadata: None,
                 }),
-                JsonTraceEvent::ThreadEnd { id, ts,  } => events.push(TraceEvent {
-                    id,
-                    end: WhichEnd::End,
-                    kind: TraceKind::Thread,
-                    parent: None,
-                    name: None,
-                    nanos: ts.as_nanos() as u64,
-                    metadata: None,
-                }),
+                JsonTraceEvent::ThreadEnd { id, ts,  } => {}
+                // JsonTraceEvent::ThreadEnd { id, ts,  } => events.push(TraceEvent {
+                //     id,
+                //     end: WhichEnd::End,
+                //     kind: TraceKind::Thread,
+                //     parent: None,
+                //     name: None,
+                //     nanos: ts.as_nanos() as u64,
+                //     metadata: None,
+                // }),
                 JsonTraceEvent::Wakeup { waking_span, parked_span, ts } => wakeups.push(TraceWakeup {
                     waking_span,
                     parked_span,
@@ -239,12 +451,8 @@ fn main() {
         }
     }
 
-    let mut spans = spans.into_iter().filter_map(|(k, v)| {
-        if parents.contains(&k) {
-            None
-        } else {
-            Some(Span { begin: (v.0).unwrap(), end: (v.1).unwrap()})
-        }
+    let mut spans = spans.into_iter().map(|(_k, v)| {
+        Span { begin: (v.0).unwrap(), end: (v.1).unwrap()}
     }).collect::<Vec<_>>();
 
     spans.sort();
@@ -260,7 +468,7 @@ fn main() {
         .with_multisampling(8);
     let display = glium::Display::new(wb, cb, &event_loop).unwrap();
 
-    let lane = Lane::new(&display, spans.clone());
+    let mut view = View::new(&display, spans.clone());
 
     let vertex_shader_src = r#"
         #version 150
@@ -268,7 +476,9 @@ fn main() {
         uniform vec2 scale;
         uniform vec2 offset;
         void main() {
-            gl_Position = vec4((position.xy + offset)*scale, 0.0, 1.0);
+            vec2 pos0 = (position + offset)*scale;
+            vec2 pos0_offset = pos0 - 0.5;
+            gl_Position = vec4(2*pos0_offset.x, -2*pos0_offset.y, 0.0, 1.0);
         }
     "#;
 
@@ -284,16 +494,12 @@ fn main() {
     let program = glium::Program::from_source(&display, vertex_shader_src, fragment_shader_src,
                                               None).unwrap();
 
-    let mut scale = Scale {
-        min_time,
-        max_time,
-        setting: 0.0,
-    };
-    let mut offset = -(max_time - min_time) / 2.0;
+    let mut scale_offset = ScaleOffset::new(min_time, max_time);
 
     let mut selection: Option<usize> = None;
     let mut frame_count = 0;
     let begin = Instant::now();
+    let mut ptr_loc = 0.0;
 
     event_loop.run(move |event, _, control_flow| {
         let next_frame_time = Instant::now() + Duration::from_nanos(16_666_667);
@@ -307,11 +513,17 @@ fn main() {
                 },
                 glutin::event::WindowEvent::CursorMoved { position, .. } => {
                     let dims = display.get_framebuffer_dimensions();
+                    println!("{:?}, {:?}", position, dims);
                     let logical_y = (position.y / dims.1 as f64) * 2.0 - 1.0;
 
                     let pixel_x = position.x as i32;
 
-                    let scale = scale.eval();
+                    view.hover((position.x as i32, position.y as i32), (dims.0 as i32, dims.1 as i32), &scale_offset);
+
+                    let offset = scale_offset.offset();
+                    let scale = scale_offset.scale();
+
+                    ptr_loc = (position.x as f32 / dims.0 as f32);
 
                     let to_pixel_coord = |c: u64| {
                         let log = ((c as f32 / 1_000_000_000.0) + offset) * scale;
@@ -349,7 +561,7 @@ fn main() {
                         None
                     };
 
-                    println!("{:?}", selection);
+                    // println!("{:?}", selection);
                 }
                 _ => return,
             },
@@ -363,30 +575,7 @@ fn main() {
             glutin::event::Event::DeviceEvent { event, .. } => match event {
                 glutin::event::DeviceEvent::MouseWheel { delta: 
                     glutin::event::MouseScrollDelta::PixelDelta(delta) } => {
-
-                    offset += delta.x as f32 / scale.eval() / 1000.0;
-
-                    // left edge of screen:
-                    // -1 == (min_time + offset)*scale
-                    // -1/scale - min_time == offset
-
-                    // right edge of screen:
-                    // 1 == (max_time + offset)*scale
-                    // 1/scale - max_time == offset
-
-                    let a = -1.0 / scale.eval() - min_time;
-                    let b = 1.0 / scale.eval() - max_time;
-                    let (offset_min, offset_max) = if a < b { (a, b) } else { (b, a) };
-
-                    if offset < offset_min {
-                        offset = offset_min;
-                    }
-
-                    if offset > offset_max {
-                        offset = offset_max;
-                    }
-
-                    scale.scroll(delta.y as f32);
+                    scale_offset.scroll(delta.x as f32, delta.y as f32, ptr_loc);
                 }
                 _ => {}
             },
@@ -402,30 +591,58 @@ fn main() {
         let mut target = display.draw();
         target.clear_color_and_depth((1.0, 1.0, 1.0, 1.0), 1.0);
 
-        let offset_vec: [f32; 2] = [offset, -0.5];
-        let render_scale = scale.eval();
-        let scale_vec: [f32; 2] = [render_scale, 0.5];
+        view.draw(&program, &mut target, &scale_offset);
 
-        let params = glium::DrawParameters {
-            depth: glium::Depth {
-                test: DepthTest::Overwrite,
-                write: true,
-                .. Default::default()
-            },
-            .. Default::default()
-        };
+        // target.draw(&lane.vertex, &lane.index, &program,
+        //             &uniform! { scale: scale_vec, offset: offset_vec, item_color: [0.0f32, 0.0, 0.0, 1.0] },
+        //             &params).unwrap();
 
-        target.draw(&lane.vertex, &lane.index, &program,
-                    &uniform! { scale: scale_vec, offset: offset_vec, item_color: [0.0f32, 0.0, 0.0, 1.0] },
-                    &params).unwrap();
-
-        if let Some(selection) = selection {
-            let selection_index_buf = lane.index.slice(6*selection .. 6*(selection + 1)).unwrap();
-            target.draw(&lane.vertex, &selection_index_buf, &program,
-                        &uniform! { scale: scale_vec, offset: offset_vec, item_color: [1.0f32, 0.0, 0.0, 1.0] },
-                        &params).unwrap();
-        }
+        // if let Some(selection) = selection {
+        //     let selection_index_buf = lane.index.slice(6*selection .. 6*(selection + 1)).unwrap();
+        //     target.draw(&lane.vertex, &selection_index_buf, &program,
+        //                 &uniform! { scale: scale_vec, offset: offset_vec, item_color: [1.0f32, 0.0, 0.0, 1.0] },
+        //                 &params).unwrap();
+        // }
 
         target.finish().unwrap();
     });
+}
+
+fn hue_to_p(p: f32, q: f32, mut t: f32) -> f32 {
+    if t <0.00 {
+        t += 1.0;
+    }
+    if t > 1.0 {
+        t -= 1.0;
+    }
+    if t < 1.0/6.0 {
+        return p + (q - p) * 6.0 * t;
+    }
+    if t < 1.0/2.0 {
+        return q;
+    }
+    if t < 2.0/3.0 {
+        return p + (q - p) * (2.0/3.0 - t) * 6.0;
+    }
+    p
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
+    if s == 0.0 {
+        (l, l, l)
+    } else {
+        let q = if l < 0.5 {
+            l * (1.0 + s)
+        } else {
+            l + s - l * s
+        };
+
+        let p = 2.0 * l - q;
+
+        (
+            hue_to_p(p, q, h + 1.0/3.0),
+            hue_to_p(p, q, h),
+            hue_to_p(p, q, h - 1.0/3.0),
+        )
+    }
 }
