@@ -9,3 +9,4 @@ cyclotron-backend = { path = "../backend"}
 structopt = "0.3.12"
 glium = "0.27.0"
 image = "0.23.2"
+serde_json = "1.0.50"
