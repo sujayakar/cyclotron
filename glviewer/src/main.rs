@@ -1,6 +1,7 @@
 use glium::{
     glutin,
     Surface,
+    Display,
     implement_vertex,
     uniform,
     index::{
@@ -36,14 +37,10 @@ enum WhichEnd {
 }
 
 enum TraceKind {
-    AsyncStart,
-    AsyncOnCPU,
-    AsyncOffCPU,
-    AsyncEnd,
-    SyncStart,
-    SyncEnd,
-    ThreadStart,
-    ThreadEnd,
+    Sync,
+    Async,
+    AsyncCPU,
+    Thread,
 }
 
 struct TraceWakeup {
@@ -59,6 +56,7 @@ struct Args {
     // hide_wakeups: Vec<String>,
 }
 
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 struct Span {
     begin: u64,
     end: u64,
@@ -69,14 +67,40 @@ struct Vertex {
     position: [f32; 2],
 }
 
-struct Row {
-    verts: VertexBuffer<Vertex>,
-    tris: IndexBuffer<u32>,
+implement_vertex!(Vertex, position);
+
+struct LaneBuilder {
+
 }
 
-impl Row {
-    fn from_it(it: impl Iterator<Item=Span>) -> Row {
-        panic!();
+struct Lane {
+    spans: Vec<Span>,
+    vertex: VertexBuffer<Vertex>,
+    index: IndexBuffer<u32>,
+}
+
+impl Lane {
+    fn new(display: &Display, spans: Vec<Span>) -> Lane {
+        let mut verts = Vec::new();
+        let mut tris = Vec::<u32>::new();
+
+        for span in &spans {
+            let s = verts.len() as u32;
+            tris.extend(&[s, s+1, s+2, s+1, s+2, s+3]);
+            verts.push(Vertex { position: [(span.begin as f32) / 1_000_000_000.0, 0.0] });
+            verts.push(Vertex { position: [(span.end as f32) / 1_000_000_000.0, 0.0] });
+            verts.push(Vertex { position: [(span.begin as f32) / 1_000_000_000.0, 1.0] });
+            verts.push(Vertex { position: [(span.end as f32) / 1_000_000_000.0, 1.0] });
+        }
+
+        let vertex = VertexBuffer::new(display, &verts).unwrap();
+        let index = IndexBuffer::new(display, PrimitiveType::TrianglesList, &tris).unwrap();
+
+        Lane {
+            spans,
+            vertex,
+            index,
+        }
     }
 }
 
@@ -123,7 +147,7 @@ fn main() {
                 JsonTraceEvent::AsyncStart { id, ts, name, parent_id, metadata } => events.push(TraceEvent {
                     id,
                     end: WhichEnd::Begin,
-                    kind: TraceKind::AsyncStart,
+                    kind: TraceKind::Async,
                     parent: Some(parent_id),
                     name: Some(name),
                     nanos: ts.as_nanos() as u64,
@@ -132,7 +156,7 @@ fn main() {
                 JsonTraceEvent::AsyncOnCPU { id, ts } => events.push(TraceEvent {
                     id,
                     end: WhichEnd::Begin,
-                    kind: TraceKind::AsyncOnCPU,
+                    kind: TraceKind::AsyncCPU,
                     parent: None,
                     name: None,
                     nanos: ts.as_nanos() as u64,
@@ -141,7 +165,7 @@ fn main() {
                 JsonTraceEvent::SyncStart { id, ts, name, parent_id, metadata } => events.push(TraceEvent {
                     id,
                     end: WhichEnd::Begin,
-                    kind: TraceKind::SyncStart,
+                    kind: TraceKind::Sync,
                     parent: Some(parent_id),
                     name: Some(name),
                     nanos: ts.as_nanos() as u64,
@@ -150,7 +174,7 @@ fn main() {
                 JsonTraceEvent::ThreadStart { id, ts, name } => events.push(TraceEvent {
                     id,
                     end: WhichEnd::Begin,
-                    kind: TraceKind::ThreadStart,
+                    kind: TraceKind::Thread,
                     parent: None,
                     name: Some(name),
                     nanos: ts.as_nanos() as u64,
@@ -159,7 +183,7 @@ fn main() {
                 JsonTraceEvent::AsyncOffCPU { id, ts,  } => events.push(TraceEvent {
                     id,
                     end: WhichEnd::End,
-                    kind: TraceKind::AsyncOffCPU,
+                    kind: TraceKind::AsyncCPU,
                     parent: None,
                     name: None,
                     nanos: ts.as_nanos() as u64,
@@ -168,7 +192,7 @@ fn main() {
                 JsonTraceEvent::AsyncEnd { id, ts, outcome } => events.push(TraceEvent {
                     id,
                     end: WhichEnd::End,
-                    kind: TraceKind::AsyncEnd,
+                    kind: TraceKind::Async,
                     parent: None,
                     name: None,
                     nanos: ts.as_nanos() as u64,
@@ -177,7 +201,7 @@ fn main() {
                 JsonTraceEvent::SyncEnd { id, ts,  } => events.push(TraceEvent {
                     id,
                     end: WhichEnd::End,
-                    kind: TraceKind::SyncEnd,
+                    kind: TraceKind::Sync,
                     parent: None,
                     name: None,
                     nanos: ts.as_nanos() as u64,
@@ -186,7 +210,7 @@ fn main() {
                 JsonTraceEvent::ThreadEnd { id, ts,  } => events.push(TraceEvent {
                     id,
                     end: WhichEnd::End,
-                    kind: TraceKind::ThreadEnd,
+                    kind: TraceKind::Thread,
                     parent: None,
                     name: None,
                     nanos: ts.as_nanos() as u64,
@@ -219,14 +243,14 @@ fn main() {
         if parents.contains(&k) {
             None
         } else {
-            Some(((v.0).unwrap(), (v.1).unwrap()))
+            Some(Span { begin: (v.0).unwrap(), end: (v.1).unwrap()})
         }
     }).collect::<Vec<_>>();
 
     spans.sort();
 
-    let min_time = (spans[0].0 as f32) / 1_000_000_000.0;
-    let max_time = (spans.iter().map(|a| a.1).max().unwrap() as f32) / 1_000_000_000.0;
+    let min_time = (spans[0].begin as f32) / 1_000_000_000.0;
+    let max_time = (spans.iter().map(|a| a.end).max().unwrap() as f32) / 1_000_000_000.0;
 
     let event_loop = glutin::event_loop::EventLoop::new();
     let wb = glutin::window::WindowBuilder::new()
@@ -236,31 +260,7 @@ fn main() {
         .with_multisampling(8);
     let display = glium::Display::new(wb, cb, &event_loop).unwrap();
 
-    implement_vertex!(Vertex, position);
-
-    // let vertex_buf = glium::vertex::VertexBuffer::new(&display, &[
-    //         Vertex { position: [-1.0,  1.0] },
-    //         Vertex { position: [ 1.0,  1.0] },
-    //         Vertex { position: [-1.0, -1.0] },
-    //         Vertex { position: [ 1.0, -1.0] },
-    //     ]).unwrap();
-
-    // let index_buf = glium::index::IndexBuffer::new(&display, PrimitiveType::TrianglesList, &[0u32, 1, 2, 1, 2, 3]).unwrap();
-
-
-    let mut verts = Vec::new();
-    let mut tris = Vec::<u32>::new();
-    for (a, b) in &spans {
-        let s = verts.len() as u32;
-        tris.extend(&[s, s+1, s+2, s+1, s+2, s+3]);
-        verts.push(Vertex { position: [(*a as f32) / 1_000_000_000.0, 0.0] });
-        verts.push(Vertex { position: [(*b as f32) / 1_000_000_000.0, 0.0] });
-        verts.push(Vertex { position: [(*a as f32) / 1_000_000_000.0, 1.0] });
-        verts.push(Vertex { position: [(*b as f32) / 1_000_000_000.0, 1.0] });
-    }
-
-    let vertex_buf = VertexBuffer::new(&display, &verts).unwrap();
-    let index_buf = IndexBuffer::new(&display, PrimitiveType::TrianglesList, &tris).unwrap();
+    let lane = Lane::new(&display, spans.clone());
 
     let vertex_shader_src = r#"
         #version 150
@@ -325,7 +325,7 @@ fn main() {
 
                     selection = if logical_y >= -0.25 && logical_y <= 0.25 {
                         let min = match spans.binary_search_by_key(
-                            &pixel_x, |s| to_pixel_coord(s.0))
+                            &pixel_x, |s| to_pixel_coord(s.begin))
                         {
                             Ok(x) => x,
                             Err(x) => x.saturating_sub(1),
@@ -334,8 +334,8 @@ fn main() {
                         let mut selected_index = None;
 
                         for i in min..spans.len() {
-                            let begin = to_pixel_coord(spans[i].0);
-                            let end = to_pixel_coord(spans[i].1);
+                            let begin = to_pixel_coord(spans[i].begin);
+                            let end = to_pixel_coord(spans[i].end);
                             if begin <= pixel_x && end >= pixel_x {
                                 selected_index = Some(i);
                                 break;
@@ -415,13 +415,13 @@ fn main() {
             .. Default::default()
         };
 
-        target.draw(&vertex_buf, &index_buf, &program,
+        target.draw(&lane.vertex, &lane.index, &program,
                     &uniform! { scale: scale_vec, offset: offset_vec, item_color: [0.0f32, 0.0, 0.0, 1.0] },
                     &params).unwrap();
 
         if let Some(selection) = selection {
-            let selection_index_buf = index_buf.slice(6*selection .. 6*(selection + 1)).unwrap();
-            target.draw(&vertex_buf, &selection_index_buf, &program,
+            let selection_index_buf = lane.index.slice(6*selection .. 6*(selection + 1)).unwrap();
+            target.draw(&lane.vertex, &selection_index_buf, &program,
                         &uniform! { scale: scale_vec, offset: offset_vec, item_color: [1.0f32, 0.0, 0.0, 1.0] },
                         &params).unwrap();
         }
