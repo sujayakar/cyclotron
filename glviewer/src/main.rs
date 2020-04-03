@@ -1,5 +1,4 @@
 use glium::{glutin, Surface, implement_vertex, uniform};
-use image;
 use std::io::Cursor;
 
 
@@ -26,17 +25,8 @@ fn main() {
         ]).unwrap();
 
 
-    let image = image::load(Cursor::new(&include_bytes!("tuto-14-diffuse.jpg")[..]),
-                            image::ImageFormat::Jpeg).unwrap().to_rgba();
-    let image_dimensions = image.dimensions();
-    let image = glium::texture::RawImage2d::from_raw_rgba_reversed(&image.into_raw(), image_dimensions);
-    let diffuse_texture = glium::texture::SrgbTexture2d::new(&display, image).unwrap();
-
-    let image = image::load(Cursor::new(&include_bytes!("tuto-14-normal.png")[..]),
-                            image::ImageFormat::Png).unwrap().to_rgba();
-    let image_dimensions = image.dimensions();
-    let image = glium::texture::RawImage2d::from_raw_rgba_reversed(&image.into_raw(), image_dimensions);
-    let normal_map = glium::texture::Texture2d::new(&display, image).unwrap();
+    // let diffuse_texture = glium::texture::SrgbTexture2d::new(&display, image).unwrap();
+    // let normal_map = glium::texture::Texture2d::new(&display, image).unwrap();
 
 
     let vertex_shader_src = r#"
@@ -65,33 +55,8 @@ fn main() {
         in vec3 v_position;
         in vec2 v_tex_coords;
         out vec4 color;
-        uniform vec3 u_light;
-        uniform sampler2D diffuse_tex;
-        uniform sampler2D normal_tex;
-        const vec3 specular_color = vec3(1.0, 1.0, 1.0);
-        mat3 cotangent_frame(vec3 normal, vec3 pos, vec2 uv) {
-            vec3 dp1 = dFdx(pos);
-            vec3 dp2 = dFdy(pos);
-            vec2 duv1 = dFdx(uv);
-            vec2 duv2 = dFdy(uv);
-            vec3 dp2perp = cross(dp2, normal);
-            vec3 dp1perp = cross(normal, dp1);
-            vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
-            vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
-            float invmax = inversesqrt(max(dot(T, T), dot(B, B)));
-            return mat3(T * invmax, B * invmax, normal);
-        }
         void main() {
-            vec3 diffuse_color = texture(diffuse_tex, v_tex_coords).rgb;
-            vec3 ambient_color = diffuse_color * 0.1;
-            vec3 normal_map = texture(normal_tex, v_tex_coords).rgb;
-            mat3 tbn = cotangent_frame(v_normal, v_position, v_tex_coords);
-            vec3 real_normal = normalize(tbn * -(normal_map * 2.0 - 1.0));
-            float diffuse = max(dot(real_normal, normalize(u_light)), 0.0);
-            vec3 camera_dir = normalize(-v_position);
-            vec3 half_direction = normalize(normalize(u_light) + camera_dir);
-            float specular = pow(max(dot(half_direction, real_normal), 0.0), 16.0);
-            color = vec4(ambient_color + diffuse * diffuse_color + specular * specular_color, 1.0);
+            color = vec4(1.0, 0.0, 0.0, 1.0);
         }
     "#;
 
@@ -120,7 +85,7 @@ fn main() {
         }
 
         let mut target = display.draw();
-        target.clear_color_and_depth((0.0, 0.0, 1.0, 1.0), 1.0);
+        target.clear_color_and_depth((1.0, 1.0, 1.0, 1.0), 1.0);
 
         let model = [
             [1.0, 0.0, 0.0, 0.0],
@@ -149,8 +114,6 @@ fn main() {
             ]
         };
 
-        let light = [1.4, 0.4, 0.7f32];
-
         let params = glium::DrawParameters {
             depth: glium::Depth {
                 test: glium::draw_parameters::DepthTest::IfLess,
@@ -161,8 +124,7 @@ fn main() {
         };
 
         target.draw(&shape, glium::index::NoIndices(glium::index::PrimitiveType::TriangleStrip), &program,
-                    &uniform! { model: model, view: view, perspective: perspective,
-                                u_light: light, diffuse_tex: &diffuse_texture, normal_tex: &normal_map },
+                    &uniform! { model: model, view: view, perspective: perspective },
                     &params).unwrap();
         target.finish().unwrap();
     });
