@@ -15,7 +15,7 @@ mod sync;
 pub mod json;
 
 pub use async::{TraceFuture, TracedFuture};
-pub use event::TraceEvent;
+pub use event::{TraceEvent, SpanId, AsyncOutcome};
 pub use sync::{TracedThread, SyncSpan};
 pub use state::{DebugLogger, NoopLogger, Logger};
 
