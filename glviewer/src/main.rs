@@ -217,7 +217,25 @@ impl View {
                 if self.highlight_lane != old_highlight {
                     if let Some(index) = index {
                         let span_id = lane.ids[index];
-                        println!("Span: {:?} {:?}", span_id, self.spans[&span_id]);
+                        let span = &self.spans[&span_id];
+                        println!("{:?} {} {}",
+                            span.kind,
+                            span.name.as_ref().map(|s| s.as_str()).unwrap_or(""),
+                            span.metadata.as_ref().map(|s| s.as_str()).unwrap_or(""));
+
+                        if let Some(mut parent) = span.parent {
+                            while let Some(span) = self.spans.get(&parent) {
+                                println!("  parent {:?} {} {}",
+                                    span.kind,
+                                    span.name.as_ref().map(|s| s.as_str()).unwrap_or(""),
+                                    span.metadata.as_ref().map(|s| s.as_str()).unwrap_or(""));
+                                if let Some(p) = span.parent {
+                                    parent = p;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -517,13 +535,11 @@ fn main() {
                 _ => {}
             },
             _ => {
-                // println!("{:?}", event);
                 return;
             }
         }
 
         // frame_count += 1;
-        // println!("fps {}", frame_count as f32 / begin.elapsed().as_secs_f32());
 
         let mut target = display.draw();
         target.clear_color_and_depth((1.0, 1.0, 1.0, 1.0), 1.0);
