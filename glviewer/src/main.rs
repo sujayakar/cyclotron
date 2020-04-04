@@ -178,9 +178,10 @@ impl View {
             let pixel_begin = (i + 1) as f32 / (lanes_len + 2) as f32 * display.1 as f32;
             let pixel_end = (i + 2) as f32 / (lanes_len + 2) as f32 * display.1 as f32;
 
+            lane.selected.clear();
             if pixel_coord.1 as f32 >= pixel_begin && (pixel_coord.1 as f32) < pixel_end {
                 self.highlight_lane = Some(i);
-                println!("hover {} {} {} {}", pixel_coord.1, display.1, pixel_begin, pixel_end);
+                lane.hover(pixel_coord.0, display.0, scale, offset);
             }
         }
     }
@@ -226,6 +227,13 @@ impl View {
             target.draw(&lane.vertex, &lane.index, &program,
                         &uniform! { scale: scale_vec, offset: offset_vec, item_color: [color.0, color.1, color.2, 1.0] },
                         &params).unwrap();
+
+            for (selected, color) in &lane.selected {
+                let selection_index_buf = lane.index.slice(6*selected .. 6*(selected + 1)).unwrap();
+                target.draw(&lane.vertex, &selection_index_buf, &program,
+                            &uniform! { scale: scale_vec, offset: offset_vec, item_color: [color[0], color[1], color[2], 1.0] },
+                            &params).unwrap();
+            }
         }
     }
 }
@@ -259,6 +267,37 @@ impl Lane {
             vertex,
             index,
             selected: Vec::new(),
+        }
+    }
+
+    fn hover(&mut self, pixel_coord: i32, display: i32, scale: f32, offset: f32) {
+        let to_pixel_coord = |c: u64| {
+            let pix = ((c as f32 / 1_000_000_000.0) + offset) * scale * display as f32;
+            if pix >= 0.0 {
+                pix as i32
+            } else if pix > display as f32 {
+                display + 10
+            } else {
+                -10
+            }
+        };
+
+        let min = match self.spans.binary_search_by_key(
+            &pixel_coord, |s| to_pixel_coord(s.begin))
+        {
+            Ok(x) => x,
+            Err(x) => x.saturating_sub(1),
+        };
+
+        for i in min..self.spans.len() {
+            let begin = to_pixel_coord(self.spans[i].begin);
+            let end = to_pixel_coord(self.spans[i].end);
+            if begin <= pixel_coord && end >= pixel_coord {
+                self.selected.push((i, [1.0, 0.0, 0.0, 1.0]));
+                break;
+            } else if begin > pixel_coord {
+                break;
+            }
         }
     }
 }
