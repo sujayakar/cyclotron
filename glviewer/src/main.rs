@@ -1,3 +1,4 @@
+use std::path::Path;
 use glium::{
     glutin,
     Surface,
@@ -19,7 +20,7 @@ use cyclotron_backend::{
 };
 use std::io::{BufReader, BufRead};
 use std::fs::File;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 struct TraceEvent {
@@ -32,16 +33,28 @@ struct TraceEvent {
     metadata: Option<String>,
 }
 
+#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+struct TraceSpan {
+    // span is first so these are ordered in time
+    span: Span,
+    id: SpanId,
+    parent: Option<SpanId>,
+    kind: TraceKind,
+    name: Option<String>,
+    metadata: Option<String>,
+}
+
 enum WhichEnd {
     Begin,
     End,
 }
 
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 enum TraceKind {
     Sync,
     Async,
     AsyncCPU,
-    Thread,
+    // Thread,
 }
 
 struct TraceWakeup {
@@ -57,7 +70,7 @@ struct Args {
     // hide_wakeups: Vec<String>,
 }
 
-#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 struct Span {
     begin: u64,
     end: u64,
@@ -71,17 +84,19 @@ struct Vertex {
 implement_vertex!(Vertex, position);
 
 struct LaneBuilder {
+    ids: Vec<SpanId>,
     spans: Vec<Span>,
 }
 
 impl LaneBuilder {
     fn new() -> LaneBuilder {
         LaneBuilder {
+            ids: Vec::new(),
             spans: Vec::new(),
         }
     }
 
-    fn try_add(&mut self, span: Span) -> bool {
+    fn try_add(&mut self, id: SpanId, span: Span) -> Option<usize> {
         let min = match self.spans.binary_search_by_key(&span.begin, |s| s.begin) {
             Ok(v) => v,
             Err(v) => v.saturating_sub(1),
@@ -93,48 +108,63 @@ impl LaneBuilder {
                 break;
             }
             if s.end > span.begin {
-                return false;
+                return None;
             }
         }
 
         if let Some(last) = self.spans.last() {
             assert!(last.begin <= span.begin);
         }
+        let index = self.spans.len();
         self.spans.push(span);
-
-        true
+        self.ids.push(id);
+        Some(index)
     }
 
     fn build(self, display: &Display) -> Lane {
-        Lane::new(display, self.spans)
+        Lane::new(display, self.ids, self.spans)
     }
 }
 
+struct LaneAssignment {
+    lane: usize,
+    index: usize,
+}
+
 struct ViewBuilder {
+    spans: HashMap<SpanId, TraceSpan>,
+    assignments: HashMap<SpanId, LaneAssignment>,
     lanes: Vec<LaneBuilder>,
 }
 
 impl ViewBuilder {
     fn new() -> ViewBuilder {
         ViewBuilder {
+            spans: HashMap::new(),
+            assignments: HashMap::new(),
             lanes: Vec::new(),
         }
     }
 
-    fn add(&mut self, span: Span) {
-        for lane in self.lanes.iter_mut() {
-            if lane.try_add(span) {
+    fn add(&mut self, span: TraceSpan) {
+        self.spans.insert(span.id, span.clone());
+
+        for (lane_id, lane) in self.lanes.iter_mut().enumerate() {
+            if let Some(index) = lane.try_add(span.id, span.span) {
+                self.assignments.insert(span.id, LaneAssignment { lane: lane_id, index });
                 return;
             }
         }
 
         let mut lane = LaneBuilder::new();
-        assert!(lane.try_add(span));
+        let index = lane.try_add(span.id, span.span).unwrap();
+        self.assignments.insert(span.id, LaneAssignment { lane: self.lanes.len(), index });
         self.lanes.push(lane);
     }
 
     fn build(self, display: &Display) -> View {
         View {
+            spans: self.spans,
             plain_rect: build_rect(display),
             lanes: self.lanes.into_iter().map(|l| l.build(display)).collect(),
             highlight_lane: None,
@@ -152,13 +182,14 @@ fn build_rect(display: &Display) -> VertexBuffer<Vertex> {
 }
 
 struct View {
+    spans: HashMap<SpanId, TraceSpan>,
     plain_rect: VertexBuffer<Vertex>,
     lanes: Vec<Lane>,
-    highlight_lane: Option<usize>,
+    highlight_lane: Option<(usize, Option<usize>)>,
 }
 
 impl View {
-    fn new(display: &Display, mut spans: Vec<Span>) -> View {
+    fn new(display: &Display, mut spans: Vec<TraceSpan>) -> View {
         spans.sort();
         let mut b = ViewBuilder::new();
         for span in spans {
@@ -171,6 +202,8 @@ impl View {
         let scale = scale_offset.scale();
         let offset = scale_offset.offset();
 
+        let old_highlight = self.highlight_lane;
+
         self.highlight_lane = None;
 
         let lanes_len = self.lanes.len();
@@ -178,10 +211,15 @@ impl View {
             let pixel_begin = (i + 1) as f32 / (lanes_len + 2) as f32 * display.1 as f32;
             let pixel_end = (i + 2) as f32 / (lanes_len + 2) as f32 * display.1 as f32;
 
-            lane.selected.clear();
             if pixel_coord.1 as f32 >= pixel_begin && (pixel_coord.1 as f32) < pixel_end {
-                self.highlight_lane = Some(i);
-                lane.hover(pixel_coord.0, display.0, scale, offset);
+                let index = lane.hover(pixel_coord.0, display.0, scale, offset);
+                self.highlight_lane = Some((i, index));
+                if self.highlight_lane != old_highlight {
+                    if let Some(index) = index {
+                        let span_id = lane.ids[index];
+                        println!("Span: {:?} {:?}", span_id, self.spans[&span_id]);
+                    }
+                }
             }
         }
     }
@@ -199,26 +237,21 @@ impl View {
             .. Default::default()
         };
 
-        // let offset_vec: [f32; 2] = [0.0, 0.5];
-        // let scale_vec: [f32; 2] = [1.0, 0.5];
-
-        // target.draw(&self.plain_rect, glium::index::NoIndices(PrimitiveType::TriangleStrip), &program,
-        //     &uniform! { scale: scale_vec, offset: offset_vec, item_color: [0.9f32, 0.9, 0.9, 1.0] },
-        //     &params).unwrap();
-
         for (i, lane) in self.lanes.iter().enumerate() {
             let color = hsl_to_rgb(i as f32 / self.lanes.len() as f32, 0.5, 0.2);
 
             let vert_scale = 1.0 / (self.lanes.len() + 2) as f32;
             let vert_offset = (i + 1) as f32;
 
-            if Some(i) == self.highlight_lane {
-                let offset_vec: [f32; 2] = [0.0, vert_offset];
-                let scale_vec: [f32; 2] = [1.0, vert_scale];
+            if let Some((lane_id, _)) = self.highlight_lane {
+                if i == lane_id {
+                    let offset_vec: [f32; 2] = [0.0, vert_offset];
+                    let scale_vec: [f32; 2] = [1.0, vert_scale];
 
-                target.draw(&self.plain_rect, glium::index::NoIndices(PrimitiveType::TriangleStrip), &program,
-                    &uniform! { scale: scale_vec, offset: offset_vec, item_color: [0.9f32, 0.9, 0.9, 1.0] },
-                    &params).unwrap();
+                    target.draw(&self.plain_rect, glium::index::NoIndices(PrimitiveType::TriangleStrip), &program,
+                        &uniform! { scale: scale_vec, offset: offset_vec, item_color: [0.9f32, 0.9, 0.9, 1.0] },
+                        &params).unwrap();
+                }
             }
 
             let offset_vec: [f32; 2] = [offset, vert_offset];
@@ -228,25 +261,27 @@ impl View {
                         &uniform! { scale: scale_vec, offset: offset_vec, item_color: [color.0, color.1, color.2, 1.0] },
                         &params).unwrap();
 
-            for (selected, color) in &lane.selected {
-                let selection_index_buf = lane.index.slice(6*selected .. 6*(selected + 1)).unwrap();
-                target.draw(&lane.vertex, &selection_index_buf, &program,
-                            &uniform! { scale: scale_vec, offset: offset_vec, item_color: [color[0], color[1], color[2], 1.0] },
-                            &params).unwrap();
+            if let Some((lane_id, Some(index))) = self.highlight_lane {
+                if i == lane_id {
+                    let selection_index_buf = lane.index.slice(6*index .. 6*(index + 1)).unwrap();
+                    target.draw(&lane.vertex, &selection_index_buf, &program,
+                                &uniform! { scale: scale_vec, offset: offset_vec, item_color: [1.0f32, 0.0, 0.0, 1.0] },
+                                &params).unwrap();
+                }
             }
         }
     }
 }
 
 struct Lane {
+    ids: Vec<SpanId>,
     spans: Vec<Span>,
     vertex: VertexBuffer<Vertex>,
     index: IndexBuffer<u32>,
-    selected: Vec<(usize, [f32; 4])>,
 }
 
 impl Lane {
-    fn new(display: &Display, spans: Vec<Span>) -> Lane {
+    fn new(display: &Display, ids: Vec<SpanId>, spans: Vec<Span>) -> Lane {
         let mut verts = Vec::new();
         let mut tris = Vec::<u32>::new();
 
@@ -263,14 +298,14 @@ impl Lane {
         let index = IndexBuffer::new(display, PrimitiveType::TrianglesList, &tris).unwrap();
 
         Lane {
+            ids,
             spans,
             vertex,
             index,
-            selected: Vec::new(),
         }
     }
 
-    fn hover(&mut self, pixel_coord: i32, display: i32, scale: f32, offset: f32) {
+    fn hover(&mut self, pixel_coord: i32, display: i32, scale: f32, offset: f32) -> Option<usize> {
         let to_pixel_coord = |c: u64| {
             let pix = ((c as f32 / 1_000_000_000.0) + offset) * scale * display as f32;
             if pix >= 0.0 {
@@ -293,12 +328,13 @@ impl Lane {
             let begin = to_pixel_coord(self.spans[i].begin);
             let end = to_pixel_coord(self.spans[i].end);
             if begin <= pixel_coord && end >= pixel_coord {
-                self.selected.push((i, [1.0, 0.0, 0.0, 1.0]));
-                break;
+                return Some(i);
             } else if begin > pixel_coord {
                 break;
             }
         }
+
+        None
     }
 }
 
@@ -380,124 +416,36 @@ impl ScaleOffset {
 fn main() {
     let args = Args::from_args();
     
-    let mut file = BufReader::new(File::open(&args.trace).unwrap());
-    let mut events = Vec::new();
-    let mut wakeups = Vec::new();
-
-    loop {
-        let mut buf = String::new();
-        let num_read = file.read_line(&mut buf).unwrap();
-
-        if num_read == 0 || !buf.ends_with("\n") {
-            break;
-        } else {
-            buf.pop();
-            match serde_json::from_str(&buf).unwrap() {
-                JsonTraceEvent::AsyncStart { id, ts, name, parent_id, metadata } => events.push(TraceEvent {
-                    id,
-                    end: WhichEnd::Begin,
-                    kind: TraceKind::Async,
-                    parent: Some(parent_id),
-                    name: Some(name),
-                    nanos: ts.as_nanos() as u64,
-                    metadata: Some(serde_json::to_string(&metadata).unwrap()),
-                }),
-                JsonTraceEvent::AsyncOnCPU { id, ts } => events.push(TraceEvent {
-                    id,
-                    end: WhichEnd::Begin,
-                    kind: TraceKind::AsyncCPU,
-                    parent: None,
-                    name: None,
-                    nanos: ts.as_nanos() as u64,
-                    metadata: None,
-                }),
-                JsonTraceEvent::SyncStart { id, ts, name, parent_id, metadata } => events.push(TraceEvent {
-                    id,
-                    end: WhichEnd::Begin,
-                    kind: TraceKind::Sync,
-                    parent: Some(parent_id),
-                    name: Some(name),
-                    nanos: ts.as_nanos() as u64,
-                    metadata: Some(serde_json::to_string(&metadata).unwrap()),
-                }),
-                JsonTraceEvent::ThreadStart { id, ts, name } => {}
-                // JsonTraceEvent::ThreadStart { id, ts, name } => events.push(TraceEvent {
-                //     id,
-                //     end: WhichEnd::Begin,
-                //     kind: TraceKind::Thread,
-                //     parent: None,
-                //     name: Some(name),
-                //     nanos: ts.as_nanos() as u64,
-                //     metadata: None,
-                // }),
-                JsonTraceEvent::AsyncOffCPU { id, ts,  } => events.push(TraceEvent {
-                    id,
-                    end: WhichEnd::End,
-                    kind: TraceKind::AsyncCPU,
-                    parent: None,
-                    name: None,
-                    nanos: ts.as_nanos() as u64,
-                    metadata: None,
-                }),
-                JsonTraceEvent::AsyncEnd { id, ts, outcome } => events.push(TraceEvent {
-                    id,
-                    end: WhichEnd::End,
-                    kind: TraceKind::Async,
-                    parent: None,
-                    name: None,
-                    nanos: ts.as_nanos() as u64,
-                    metadata: Some(format!("{:?}", outcome)),
-                }),
-                JsonTraceEvent::SyncEnd { id, ts,  } => events.push(TraceEvent {
-                    id,
-                    end: WhichEnd::End,
-                    kind: TraceKind::Sync,
-                    parent: None,
-                    name: None,
-                    nanos: ts.as_nanos() as u64,
-                    metadata: None,
-                }),
-                JsonTraceEvent::ThreadEnd { id, ts,  } => {}
-                // JsonTraceEvent::ThreadEnd { id, ts,  } => events.push(TraceEvent {
-                //     id,
-                //     end: WhichEnd::End,
-                //     kind: TraceKind::Thread,
-                //     parent: None,
-                //     name: None,
-                //     nanos: ts.as_nanos() as u64,
-                //     metadata: None,
-                // }),
-                JsonTraceEvent::Wakeup { waking_span, parked_span, ts } => wakeups.push(TraceWakeup {
-                    waking_span,
-                    parked_span,
-                    nanos: ts.as_nanos() as u64,
-                })
-            }
-        }
-    }
+    let (events, _wakeups) = read_events(&args.trace);
 
     let mut spans = HashMap::new();
-    let mut parents = HashSet::new();
 
     for event in events {
+        let id = event.id;
         match event.end {
-            WhichEnd::Begin => spans.entry(event.id).or_insert((None, None)).0 = Some(event.nanos),
-            WhichEnd::End => spans.entry(event.id).or_insert((None, None)).1 = Some(event.nanos),
-        }
-
-        if let Some(parent_id) = event.parent {
-            parents.insert(parent_id);
+            WhichEnd::Begin => spans.entry(id).or_insert((None, None)).0 = Some(event),
+            WhichEnd::End => spans.entry(id).or_insert((None, None)).1 = Some(event),
         }
     }
 
     let mut spans = spans.into_iter().map(|(_k, v)| {
-        Span { begin: (v.0).unwrap(), end: (v.1).unwrap()}
+        let begin = (v.0).unwrap();
+        let end = (v.1).unwrap();
+        
+        let span = Span { begin: begin.nanos, end: end.nanos };
+
+        TraceSpan {
+            span,
+            id: begin.id,
+            parent: begin.parent,
+            kind: begin.kind,
+            name: begin.name,
+            metadata: begin.metadata,
+        }
     }).collect::<Vec<_>>();
 
-    spans.sort();
-
-    let min_time = (spans[0].begin as f32) / 1_000_000_000.0;
-    let max_time = (spans.iter().map(|a| a.end).max().unwrap() as f32) / 1_000_000_000.0;
+    let min_time = (spans[0].span.begin as f32) / 1_000_000_000.0;
+    let max_time = (spans.iter().map(|a| a.span.end).max().unwrap() as f32) / 1_000_000_000.0;
 
     let event_loop = glutin::event_loop::EventLoop::new();
     let wb = glutin::window::WindowBuilder::new()
@@ -507,7 +455,7 @@ fn main() {
         .with_multisampling(8);
     let display = glium::Display::new(wb, cb, &event_loop).unwrap();
 
-    let mut view = View::new(&display, spans.clone());
+    let mut view = View::new(&display, spans);
 
     let vertex_shader_src = r#"
         #version 150
@@ -535,9 +483,6 @@ fn main() {
 
     let mut scale_offset = ScaleOffset::new(min_time, max_time);
 
-    let mut selection: Option<usize> = None;
-    let mut frame_count = 0;
-    let begin = Instant::now();
     let mut ptr_loc = 0.0;
 
     event_loop.run(move |event, _, control_flow| {
@@ -552,55 +497,8 @@ fn main() {
                 },
                 glutin::event::WindowEvent::CursorMoved { position, .. } => {
                     let dims = display.get_framebuffer_dimensions();
-                    println!("{:?}, {:?}", position, dims);
-                    let logical_y = (position.y / dims.1 as f64) * 2.0 - 1.0;
-
-                    let pixel_x = position.x as i32;
-
                     view.hover((position.x as i32, position.y as i32), (dims.0 as i32, dims.1 as i32), &scale_offset);
-
-                    let offset = scale_offset.offset();
-                    let scale = scale_offset.scale();
-
-                    ptr_loc = (position.x as f32 / dims.0 as f32);
-
-                    let to_pixel_coord = |c: u64| {
-                        let log = ((c as f32 / 1_000_000_000.0) + offset) * scale;
-                        let pix = (log + 1.0) / 2.0 * (dims.0 as f32);
-                        if pix >= 0.0 {
-                            pix as i32
-                        } else {
-                            -10
-                        }
-                    };
-
-                    selection = if logical_y >= -0.25 && logical_y <= 0.25 {
-                        let min = match spans.binary_search_by_key(
-                            &pixel_x, |s| to_pixel_coord(s.begin))
-                        {
-                            Ok(x) => x,
-                            Err(x) => x.saturating_sub(1),
-                        };
-
-                        let mut selected_index = None;
-
-                        for i in min..spans.len() {
-                            let begin = to_pixel_coord(spans[i].begin);
-                            let end = to_pixel_coord(spans[i].end);
-                            if begin <= pixel_x && end >= pixel_x {
-                                selected_index = Some(i);
-                                break;
-                            } else if begin > pixel_x {
-                                break;
-                            }
-                        }
-
-                        selected_index
-                    } else {
-                        None
-                    };
-
-                    // println!("{:?}", selection);
+                    ptr_loc = position.x as f32 / dims.0 as f32;
                 }
                 _ => return,
             },
@@ -684,4 +582,105 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
             hue_to_p(p, q, h - 1.0/3.0),
         )
     }
+}
+
+fn read_events(path: impl AsRef<Path>) -> (Vec<TraceEvent>, Vec<TraceWakeup>) {
+
+    let mut file = BufReader::new(File::open(path).unwrap());
+    let mut events = Vec::new();
+    let mut wakeups = Vec::new();
+
+    loop {
+        let mut buf = String::new();
+        let num_read = file.read_line(&mut buf).unwrap();
+
+        if num_read == 0 || !buf.ends_with("\n") {
+            break;
+        } else {
+            buf.pop();
+            match serde_json::from_str(&buf).unwrap() {
+                JsonTraceEvent::AsyncStart { id, ts, name, parent_id, metadata } => events.push(TraceEvent {
+                    id,
+                    end: WhichEnd::Begin,
+                    kind: TraceKind::Async,
+                    parent: Some(parent_id),
+                    name: Some(name),
+                    nanos: ts.as_nanos() as u64,
+                    metadata: Some(serde_json::to_string(&metadata).unwrap()),
+                }),
+                JsonTraceEvent::AsyncOnCPU { id, ts } => events.push(TraceEvent {
+                    id,
+                    end: WhichEnd::Begin,
+                    kind: TraceKind::AsyncCPU,
+                    parent: None,
+                    name: None,
+                    nanos: ts.as_nanos() as u64,
+                    metadata: None,
+                }),
+                JsonTraceEvent::SyncStart { id, ts, name, parent_id, metadata } => events.push(TraceEvent {
+                    id,
+                    end: WhichEnd::Begin,
+                    kind: TraceKind::Sync,
+                    parent: Some(parent_id),
+                    name: Some(name),
+                    nanos: ts.as_nanos() as u64,
+                    metadata: Some(serde_json::to_string(&metadata).unwrap()),
+                }),
+                JsonTraceEvent::ThreadStart { id: _, ts: _, name: _ } => {}
+                // JsonTraceEvent::ThreadStart { id, ts, name } => events.push(TraceEvent {
+                //     id,
+                //     end: WhichEnd::Begin,
+                //     kind: TraceKind::Thread,
+                //     parent: None,
+                //     name: Some(name),
+                //     nanos: ts.as_nanos() as u64,
+                //     metadata: None,
+                // }),
+                JsonTraceEvent::AsyncOffCPU { id, ts,  } => events.push(TraceEvent {
+                    id,
+                    end: WhichEnd::End,
+                    kind: TraceKind::AsyncCPU,
+                    parent: None,
+                    name: None,
+                    nanos: ts.as_nanos() as u64,
+                    metadata: None,
+                }),
+                JsonTraceEvent::AsyncEnd { id, ts, outcome } => events.push(TraceEvent {
+                    id,
+                    end: WhichEnd::End,
+                    kind: TraceKind::Async,
+                    parent: None,
+                    name: None,
+                    nanos: ts.as_nanos() as u64,
+                    metadata: Some(format!("{:?}", outcome)),
+                }),
+                JsonTraceEvent::SyncEnd { id, ts,  } => events.push(TraceEvent {
+                    id,
+                    end: WhichEnd::End,
+                    kind: TraceKind::Sync,
+                    parent: None,
+                    name: None,
+                    nanos: ts.as_nanos() as u64,
+                    metadata: None,
+                }),
+                JsonTraceEvent::ThreadEnd { id: _, ts: _,  } => {}
+                // JsonTraceEvent::ThreadEnd { id, ts,  } => events.push(TraceEvent {
+                //     id,
+                //     end: WhichEnd::End,
+                //     kind: TraceKind::Thread,
+                //     parent: None,
+                //     name: None,
+                //     nanos: ts.as_nanos() as u64,
+                //     metadata: None,
+                // }),
+                JsonTraceEvent::Wakeup { waking_span, parked_span, ts } => wakeups.push(TraceWakeup {
+                    waking_span,
+                    parked_span,
+                    nanos: ts.as_nanos() as u64,
+                })
+            }
+        }
+    }
+
+    (events, wakeups)
 }
