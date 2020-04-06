@@ -159,10 +159,22 @@ impl ViewBuilder {
         self.min_time = std::cmp::min(self.min_time, span.span.begin);
         self.max_time = std::cmp::max(self.max_time, span.span.end);
 
+        let min_lane = if let Some(parent) = span.parent {
+            if let Some(parent) = self.assignments.get(&parent) {
+                parent.lane + 1
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
         for (lane_id, lane) in self.lanes.iter_mut().enumerate() {
-            if let Some(index) = lane.try_add(span.parent, span.id, span.span) {
-                self.assignments.insert(span.id, LaneAssignment { lane: lane_id, index });
-                return;
+            if lane_id > min_lane {
+                if let Some(index) = lane.try_add(span.parent, span.id, span.span) {
+                    self.assignments.insert(span.id, LaneAssignment { lane: lane_id, index });
+                    return;
+                }
             }
         }
 
