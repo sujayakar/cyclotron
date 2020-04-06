@@ -79,11 +79,13 @@ struct Span {
 #[derive(Copy, Clone)]
 struct Vertex {
     position: [f32; 2],
+    parent_ident: u32,
 }
 
-implement_vertex!(Vertex, position);
+implement_vertex!(Vertex, position, parent_ident);
 
 struct LaneBuilder {
+    parent_ids: Vec<Option<SpanId>>,
     ids: Vec<SpanId>,
     spans: Vec<Span>,
 }
@@ -91,12 +93,13 @@ struct LaneBuilder {
 impl LaneBuilder {
     fn new() -> LaneBuilder {
         LaneBuilder {
+            parent_ids: Vec::new(),
             ids: Vec::new(),
             spans: Vec::new(),
         }
     }
 
-    fn try_add(&mut self, id: SpanId, span: Span) -> Option<usize> {
+    fn try_add(&mut self, parent_id: Option<SpanId>, id: SpanId, span: Span) -> Option<usize> {
         let min = match self.spans.binary_search_by_key(&span.begin, |s| s.begin) {
             Ok(v) => v,
             Err(v) => v.saturating_sub(1),
@@ -118,11 +121,12 @@ impl LaneBuilder {
         let index = self.spans.len();
         self.spans.push(span);
         self.ids.push(id);
+        self.parent_ids.push(parent_id);
         Some(index)
     }
 
     fn build(self, display: &Display) -> Lane {
-        Lane::new(display, self.ids, self.spans)
+        Lane::new(display, self.parent_ids, self.ids, self.spans)
     }
 }
 
@@ -156,14 +160,14 @@ impl ViewBuilder {
         self.max_time = std::cmp::max(self.max_time, span.span.end);
 
         for (lane_id, lane) in self.lanes.iter_mut().enumerate() {
-            if let Some(index) = lane.try_add(span.id, span.span) {
+            if let Some(index) = lane.try_add(span.parent, span.id, span.span) {
                 self.assignments.insert(span.id, LaneAssignment { lane: lane_id, index });
                 return;
             }
         }
 
         let mut lane = LaneBuilder::new();
-        let index = lane.try_add(span.id, span.span).unwrap();
+        let index = lane.try_add(span.parent, span.id, span.span).unwrap();
         self.assignments.insert(span.id, LaneAssignment { lane: self.lanes.len(), index });
         self.lanes.push(lane);
     }
@@ -190,10 +194,10 @@ impl ViewBuilder {
 
 fn build_rect(display: &Display) -> VertexBuffer<Vertex> {
     VertexBuffer::new(display, &[
-        Vertex { position: [0.0, 0.0] },
-        Vertex { position: [1.0, 0.0] },
-        Vertex { position: [0.0, 1.0] },
-        Vertex { position: [1.0, 1.0] },
+        Vertex { position: [0.0, 0.0], parent_ident: 0xffffffff },
+        Vertex { position: [1.0, 0.0], parent_ident: 0xffffffff },
+        Vertex { position: [0.0, 1.0], parent_ident: 0xffffffff },
+        Vertex { position: [1.0, 1.0], parent_ident: 0xffffffff },
     ]).unwrap()
 }
 
@@ -347,6 +351,12 @@ impl View {
 
         let rects = self.compute_lane_rects();
 
+        let highlight_item = if let Some((lane_id, Some(index))) = self.highlight_lane {
+            (self.lanes[lane_id].ids[index].0 & 0xffffffff) as u32
+        } else {
+            0xfffffffe
+        };
+
         for (i, lane) in self.lanes.iter().enumerate() {
             let color = hsl_to_rgb(i as f32 / self.lanes.len() as f32, 0.5, 0.2);
 
@@ -368,14 +378,26 @@ impl View {
             let scale_vec: [f32; 2] = [scale, vert_scale];
 
             target.draw(&lane.vertex, &lane.index, &program,
-                        &uniform! { scale: scale_vec, offset: offset_vec, item_color: [color.0, color.1, color.2, 1.0] },
+                        &uniform! {
+                            scale: scale_vec,
+                            offset: offset_vec,
+                            item_color: [color.0, color.1, color.2, 1.0],
+                            parent_color: [1.0f32, 0.0, 1.0, 1.0],
+                            highlight_item: highlight_item,
+                        },
                         &params).unwrap();
 
             if let Some((lane_id, Some(index))) = self.highlight_lane {
                 if i == lane_id {
                     let selection_index_buf = lane.index.slice(6*index .. 6*(index + 1)).unwrap();
                     target.draw(&lane.vertex, &selection_index_buf, &program,
-                                &uniform! { scale: scale_vec, offset: offset_vec, item_color: [1.0f32, 0.0, 0.0, 1.0] },
+                                &uniform! {
+                                    scale: scale_vec,
+                                    offset: offset_vec,
+                                    item_color: [1.0f32, 0.0, 0.0, 1.0],
+                                    parent_color: [1.0f32, 0.0, 0.0, 1.0],
+                                    highlight_item: 0xfffffffeu32,
+                                },
                                 &params).unwrap();
                 }
             }
@@ -425,17 +447,19 @@ struct Lane {
 }
 
 impl Lane {
-    fn new(display: &Display, ids: Vec<SpanId>, spans: Vec<Span>) -> Lane {
+    fn new(display: &Display, parent_ids: Vec<Option<SpanId>>, ids: Vec<SpanId>, spans: Vec<Span>) -> Lane {
         let mut verts = Vec::new();
         let mut tris = Vec::<u32>::new();
 
-        for span in &spans {
+        for (parent_id, span) in parent_ids.iter().zip(spans.iter()) {
+            let parent_ident = parent_id.map(|p| (p.0  & 0xffffffff) as u32).unwrap_or(0xffffffff);
+
             let s = verts.len() as u32;
             tris.extend(&[s, s+1, s+2, s+1, s+2, s+3]);
-            verts.push(Vertex { position: [(span.begin as f32) / 1_000_000_000.0, 0.0] });
-            verts.push(Vertex { position: [(span.end as f32) / 1_000_000_000.0, 0.0] });
-            verts.push(Vertex { position: [(span.begin as f32) / 1_000_000_000.0, 1.0] });
-            verts.push(Vertex { position: [(span.end as f32) / 1_000_000_000.0, 1.0] });
+            verts.push(Vertex { position: [(span.begin as f32) / 1_000_000_000.0, 0.0], parent_ident });
+            verts.push(Vertex { position: [(span.end as f32) / 1_000_000_000.0, 0.0], parent_ident });
+            verts.push(Vertex { position: [(span.begin as f32) / 1_000_000_000.0, 1.0], parent_ident });
+            verts.push(Vertex { position: [(span.end as f32) / 1_000_000_000.0, 1.0], parent_ident });
         }
 
         let vertex = VertexBuffer::new(display, &verts).unwrap();
@@ -610,22 +634,36 @@ fn main() {
 
     let vertex_shader_src = r#"
         #version 150
+        in uint parent_ident;
         in vec2 position;
+
+        uniform vec4 parent_color;
+        uniform vec4 item_color;
         uniform vec2 scale;
         uniform vec2 offset;
+        uniform uint highlight_item;
+        
+        out vec4 vert_color;
+        
         void main() {
             vec2 pos0 = (position + offset)*scale;
             vec2 pos0_offset = pos0 - 0.5;
             gl_Position = vec4(2*pos0_offset.x, -2*pos0_offset.y, 0.0, 1.0);
+
+            if(highlight_item == parent_ident) {
+                vert_color = parent_color;
+            } else {
+                vert_color = item_color;
+            }
         }
     "#;
 
     let fragment_shader_src = r#"
         #version 140
-        uniform vec4 item_color;
+        in vec4 vert_color;
         out vec4 color;
         void main() {
-            color = item_color;
+            color = vert_color;
         }
     "#;
 
@@ -678,17 +716,6 @@ fn main() {
         target.clear_color_and_depth((1.0, 1.0, 1.0, 1.0), 1.0);
 
         view.draw(&program, &mut target);
-
-        // target.draw(&lane.vertex, &lane.index, &program,
-        //             &uniform! { scale: scale_vec, offset: offset_vec, item_color: [0.0f32, 0.0, 0.0, 1.0] },
-        //             &params).unwrap();
-
-        // if let Some(selection) = selection {
-        //     let selection_index_buf = lane.index.slice(6*selection .. 6*(selection + 1)).unwrap();
-        //     target.draw(&lane.vertex, &selection_index_buf, &program,
-        //                 &uniform! { scale: scale_vec, offset: offset_vec, item_color: [1.0f32, 0.0, 0.0, 1.0] },
-        //                 &params).unwrap();
-        // }
 
         target.finish().unwrap();
     });
