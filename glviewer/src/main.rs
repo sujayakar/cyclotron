@@ -1,4 +1,9 @@
+mod db;
+mod layout;
+
 use std::path::Path;
+use crate::db::{Database, Span};
+use crate::layout::Layout;
 use glium::{
     glutin,
     Surface,
@@ -44,12 +49,21 @@ struct TraceSpan {
     metadata: Option<String>,
 }
 
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+struct RenderSpan {
+    // span is first so these are ordered in time
+    span: Span,
+    id: u32,
+    parent: u32, // 0xffffffff as a sentinel
+    group: u32,
+}
+
 enum WhichEnd {
     Begin,
     End,
 }
 
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 enum TraceKind {
     Sync,
     Async,
@@ -70,63 +84,52 @@ struct Args {
     // hide_wakeups: Vec<String>,
 }
 
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
-struct Span {
-    begin: u64,
-    end: u64,
-}
-
 #[derive(Copy, Clone)]
 struct Vertex {
     position: [f32; 2],
     parent_ident: u32,
+    group_ident: u32,
 }
 
-implement_vertex!(Vertex, position, parent_ident);
+implement_vertex!(Vertex, position, parent_ident, group_ident);
 
 struct LaneBuilder {
-    parent_ids: Vec<Option<SpanId>>,
-    ids: Vec<SpanId>,
-    spans: Vec<Span>,
+    spans: Vec<RenderSpan>,
 }
 
 impl LaneBuilder {
     fn new() -> LaneBuilder {
         LaneBuilder {
-            parent_ids: Vec::new(),
-            ids: Vec::new(),
             spans: Vec::new(),
         }
     }
 
-    fn try_add(&mut self, parent_id: Option<SpanId>, id: SpanId, span: Span) -> Option<usize> {
-        let min = match self.spans.binary_search_by_key(&span.begin, |s| s.begin) {
+    fn try_add(&mut self, span: RenderSpan) -> Option<usize> {
+        let min = match self.spans.binary_search_by_key(&span.span.begin, |s| s.span.begin) {
             Ok(v) => v,
             Err(v) => v.saturating_sub(1),
         };
 
         for i in min..self.spans.len() {
             let s = self.spans[i];
-            if s.begin >= span.end {
+            if s.span.begin >= span.span.end {
                 break;
             }
-            if s.end > span.begin {
+            if s.span.end > span.span.begin {
                 return None;
             }
         }
 
         if let Some(last) = self.spans.last() {
-            assert!(last.begin <= span.begin);
+            assert!(last.span.begin <= span.span.begin);
         }
         let index = self.spans.len();
         self.spans.push(span);
-        self.ids.push(id);
-        self.parent_ids.push(parent_id);
         Some(index)
     }
 
     fn build(self, display: &Display) -> Lane {
-        Lane::new(display, self.parent_ids, self.ids, self.spans)
+        Lane::new(display, self.spans)
     }
 }
 
@@ -136,8 +139,10 @@ struct LaneAssignment {
 }
 
 struct ViewBuilder {
-    spans: HashMap<SpanId, TraceSpan>,
-    assignments: HashMap<SpanId, LaneAssignment>,
+    spans: HashMap<u32, TraceSpan>,
+    short_ids: HashMap<SpanId, u32>,
+    groups: HashMap<(TraceKind, Option<String>), u32>,
+    assignments: HashMap<u32, LaneAssignment>,
     lanes: Vec<LaneBuilder>,
     min_time: u64,
     max_time: u64,
@@ -147,6 +152,8 @@ impl ViewBuilder {
     fn new() -> ViewBuilder {
         ViewBuilder {
             spans: HashMap::new(),
+            groups: HashMap::new(),
+            short_ids: HashMap::new(),
             assignments: HashMap::new(),
             lanes: Vec::new(),
             min_time: std::u64::MAX,
@@ -155,7 +162,6 @@ impl ViewBuilder {
     }
 
     fn add(&mut self, span: TraceSpan) {
-        self.spans.insert(span.id, span.clone());
 
         if span.kind != TraceKind::Thread {
             // In some traces, threads start/end long before the "interesting" stuff, so just cut them out.
@@ -164,7 +170,8 @@ impl ViewBuilder {
         }
 
         let min_lane = if let Some(parent) = span.parent {
-            if let Some(parent) = self.assignments.get(&parent) {
+            println!("parent {:?} item {:?}", parent, span.id);
+            if let Some(parent) = self.assignments.get(&self.short_ids[&parent]) {
                 parent.lane + 1
             } else {
                 0
@@ -173,18 +180,33 @@ impl ViewBuilder {
             0
         };
 
+        let next_group_id = self.groups.len() as u32;
+        let group = *self.groups.entry((span.kind, span.name.clone())).or_insert(next_group_id);
+
+        let next_short_id = self.short_ids.len() as u32;
+        let short_id = *self.short_ids.entry(span.id).or_insert(next_short_id);
+
+        self.spans.insert(short_id, span.clone());
+
+        let render_span = RenderSpan {
+            span: span.span,
+            id: short_id,
+            parent: span.parent.map(|p| self.short_ids[&p]).unwrap_or(0xffffffff),
+            group,
+        };
+
         for (lane_id, lane) in self.lanes.iter_mut().enumerate() {
             if lane_id > min_lane {
-                if let Some(index) = lane.try_add(span.parent, span.id, span.span) {
-                    self.assignments.insert(span.id, LaneAssignment { lane: lane_id, index });
+                if let Some(index) = lane.try_add(render_span) {
+                    self.assignments.insert(short_id, LaneAssignment { lane: lane_id, index });
                     return;
                 }
             }
         }
 
         let mut lane = LaneBuilder::new();
-        let index = lane.try_add(span.parent, span.id, span.span).unwrap();
-        self.assignments.insert(span.id, LaneAssignment { lane: self.lanes.len(), index });
+        let index = lane.try_add(render_span).unwrap();
+        self.assignments.insert(short_id, LaneAssignment { lane: self.lanes.len(), index });
         self.lanes.push(lane);
     }
 
@@ -194,6 +216,7 @@ impl ViewBuilder {
             scale_offset: ScaleOffset::new(
                 (self.min_time as f32) / 1_000_000_000.0,
                 (self.max_time as f32) / 1_000_000_000.0),
+            short_ids: self.short_ids,
             spans: self.spans,
             plain_rect: build_rect(display),
             lane_sizes: self.lanes.iter().map(|_| LaneSize {
@@ -210,10 +233,10 @@ impl ViewBuilder {
 
 fn build_rect(display: &Display) -> VertexBuffer<Vertex> {
     VertexBuffer::new(display, &[
-        Vertex { position: [0.0, 0.0], parent_ident: 0xffffffff },
-        Vertex { position: [1.0, 0.0], parent_ident: 0xffffffff },
-        Vertex { position: [0.0, 1.0], parent_ident: 0xffffffff },
-        Vertex { position: [1.0, 1.0], parent_ident: 0xffffffff },
+        Vertex { position: [0.0, 0.0], parent_ident: 0xffffffff, group_ident: 0xffffffff },
+        Vertex { position: [1.0, 0.0], parent_ident: 0xffffffff, group_ident: 0xffffffff },
+        Vertex { position: [0.0, 1.0], parent_ident: 0xffffffff, group_ident: 0xffffffff },
+        Vertex { position: [1.0, 1.0], parent_ident: 0xffffffff, group_ident: 0xffffffff },
     ]).unwrap()
 }
 
@@ -232,7 +255,8 @@ struct LaneSize {
 
 struct View {
     scale_offset: ScaleOffset,
-    spans: HashMap<SpanId, TraceSpan>,
+    short_ids: HashMap<SpanId, u32>,
+    spans: HashMap<u32, TraceSpan>,
     plain_rect: VertexBuffer<Vertex>,
     lanes: Vec<Lane>,
     lane_sizes: Vec<LaneSize>,
@@ -326,7 +350,7 @@ impl View {
                 self.highlight_lane = Some((i, index));
                 if self.highlight_lane != old_highlight {
                     if let Some(index) = index {
-                        let span_id = lane.ids[index];
+                        let span_id = lane.spans[index].id;
                         let span = &self.spans[&span_id];
                         println!("{:?} {} {}",
                             span.kind,
@@ -334,7 +358,7 @@ impl View {
                             span.metadata.as_ref().map(|s| s.as_str()).unwrap_or(""));
 
                         if let Some(mut parent) = span.parent {
-                            while let Some(span) = self.spans.get(&parent) {
+                            while let Some(span) = self.spans.get(&self.short_ids[&parent]) {
                                 println!("  parent {:?} {} {}",
                                     span.kind,
                                     span.name.as_ref().map(|s| s.as_str()).unwrap_or(""),
@@ -368,7 +392,7 @@ impl View {
         let rects = self.compute_lane_rects();
 
         let highlight_item = if let Some((lane_id, Some(index))) = self.highlight_lane {
-            (self.lanes[lane_id].ids[index].0 & 0xffffffff) as u32
+            self.lanes[lane_id].spans[index].id
         } else {
             0xfffffffe
         };
@@ -399,6 +423,7 @@ impl View {
                             offset: offset_vec,
                             item_color: [color.0, color.1, color.2, 1.0],
                             parent_color: [1.0f32, 0.0, 1.0, 1.0],
+                            group_color: [0.0f32, 1.0, 0.0, 1.0],
                             highlight_item: highlight_item,
                         },
                         &params).unwrap();
@@ -412,6 +437,7 @@ impl View {
                                     offset: offset_vec,
                                     item_color: [1.0f32, 0.0, 0.0, 1.0],
                                     parent_color: [1.0f32, 0.0, 0.0, 1.0],
+                                    group_color: [0.0f32, 1.0, 0.0, 1.0],
                                     highlight_item: 0xfffffffeu32,
                                 },
                                 &params).unwrap();
@@ -454,33 +480,33 @@ impl View {
 }
 
 struct Lane {
-    ids: Vec<SpanId>,
-    spans: Vec<Span>,
+    spans: Vec<RenderSpan>,
     vertex: VertexBuffer<Vertex>,
     index: IndexBuffer<u32>,
 }
 
 impl Lane {
-    fn new(display: &Display, parent_ids: Vec<Option<SpanId>>, ids: Vec<SpanId>, spans: Vec<Span>) -> Lane {
+    fn new(display: &Display, spans: Vec<RenderSpan>) -> Lane {
         let mut verts = Vec::new();
         let mut tris = Vec::<u32>::new();
 
-        for (parent_id, span) in parent_ids.iter().zip(spans.iter()) {
-            let parent_ident = parent_id.map(|p| (p.0  & 0xffffffff) as u32).unwrap_or(0xffffffff);
+        for span in &spans {
+            let parent_ident = span.parent;
+            let group_ident = span.group;
 
             let s = verts.len() as u32;
             tris.extend(&[s, s+1, s+2, s+1, s+2, s+3]);
-            verts.push(Vertex { position: [(span.begin as f32) / 1_000_000_000.0, 0.0], parent_ident });
-            verts.push(Vertex { position: [(span.end as f32) / 1_000_000_000.0, 0.0], parent_ident });
-            verts.push(Vertex { position: [(span.begin as f32) / 1_000_000_000.0, 1.0], parent_ident });
-            verts.push(Vertex { position: [(span.end as f32) / 1_000_000_000.0, 1.0], parent_ident });
+
+            verts.push(Vertex { position: [(span.span.begin as f32) / 1_000_000_000.0, 0.0], parent_ident, group_ident });
+            verts.push(Vertex { position: [(span.span.end as f32) / 1_000_000_000.0, 0.0], parent_ident, group_ident });
+            verts.push(Vertex { position: [(span.span.begin as f32) / 1_000_000_000.0, 1.0], parent_ident, group_ident });
+            verts.push(Vertex { position: [(span.span.end as f32) / 1_000_000_000.0, 1.0], parent_ident, group_ident });
         }
 
         let vertex = VertexBuffer::new(display, &verts).unwrap();
         let index = IndexBuffer::new(display, PrimitiveType::TrianglesList, &tris).unwrap();
 
         Lane {
-            ids,
             spans,
             vertex,
             index,
@@ -488,8 +514,8 @@ impl Lane {
     }
 
     fn has_contents(&self, left: u64, right: u64) -> bool {
-        let min = self.spans.binary_search_by_key(&left, |s| s.end).unwrap_or_else(|e| e);
-        let max = self.spans.binary_search_by_key(&right, |s| s.begin).unwrap_or_else(|e| e);
+        let min = self.spans.binary_search_by_key(&left, |s| s.span.end).unwrap_or_else(|e| e);
+        let max = self.spans.binary_search_by_key(&right, |s| s.span.begin).unwrap_or_else(|e| e);
 
         min < max
     }
@@ -507,15 +533,15 @@ impl Lane {
         };
 
         let min = match self.spans.binary_search_by_key(
-            &pixel_coord, |s| to_pixel_coord(s.begin))
+            &pixel_coord, |s| to_pixel_coord(s.span.begin))
         {
             Ok(x) => x,
             Err(x) => x.saturating_sub(1),
         };
 
         for i in min..self.spans.len() {
-            let begin = to_pixel_coord(self.spans[i].begin);
-            let end = to_pixel_coord(self.spans[i].end);
+            let begin = to_pixel_coord(self.spans[i].span.begin);
+            let end = to_pixel_coord(self.spans[i].span.end);
             if begin <= pixel_coord && end >= pixel_coord {
                 return Some(i);
             } else if begin > pixel_coord {
@@ -604,6 +630,9 @@ impl ScaleOffset {
 
 fn main() {
     let args = Args::from_args();
+
+    let db = Database::load(&args.trace);
+    let layout = Layout::new(&db);
     
     let (events, _wakeups) = read_events(&args.trace);
 
@@ -646,13 +675,16 @@ fn main() {
     let vertex_shader_src = r#"
         #version 150
         in uint parent_ident;
+        in uint group_ident;
         in vec2 position;
 
         uniform vec4 parent_color;
+        uniform vec4 group_color;
         uniform vec4 item_color;
         uniform vec2 scale;
         uniform vec2 offset;
         uniform uint highlight_item;
+        uniform uint highlight_group;
         
         out vec4 vert_color;
         
@@ -663,6 +695,8 @@ fn main() {
 
             if(highlight_item == parent_ident) {
                 vert_color = parent_color;
+            } else if(highlight_group == group_ident) {
+                vert_color = group_color;
             } else {
                 vert_color = item_color;
             }
