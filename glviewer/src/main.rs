@@ -54,7 +54,7 @@ enum TraceKind {
     Sync,
     Async,
     AsyncCPU,
-    // Thread,
+    Thread,
 }
 
 struct TraceWakeup {
@@ -156,8 +156,12 @@ impl ViewBuilder {
 
     fn add(&mut self, span: TraceSpan) {
         self.spans.insert(span.id, span.clone());
-        self.min_time = std::cmp::min(self.min_time, span.span.begin);
-        self.max_time = std::cmp::max(self.max_time, span.span.end);
+
+        if span.kind != TraceKind::Thread {
+            // In some traces, threads start/end long before the "interesting" stuff, so just cut them out.
+            self.min_time = std::cmp::min(self.min_time, span.span.begin);
+            self.max_time = std::cmp::max(self.max_time, span.span.end);
+        }
 
         let min_lane = if let Some(parent) = span.parent {
             if let Some(parent) = self.assignments.get(&parent) {
@@ -433,9 +437,7 @@ impl View {
 
         let now = Instant::now();
 
-        let mut i = 0;
         for (lane, size) in self.lanes.iter().zip(self.lane_sizes.iter_mut()) {
-            i += 1;
             let target = if lane.has_contents(left, right) {
                 TargetSize::Full
             } else {
@@ -631,9 +633,6 @@ fn main() {
         }
     }).collect::<Vec<_>>();
 
-    let min_time = (spans[0].span.begin as f32) / 1_000_000_000.0;
-    let max_time = (spans.iter().map(|a| a.span.end).max().unwrap() as f32) / 1_000_000_000.0;
-
     let event_loop = glutin::event_loop::EventLoop::new();
     let wb = glutin::window::WindowBuilder::new()
         .with_title(format!("Cyclotron: {}", args.trace));
@@ -681,8 +680,6 @@ fn main() {
 
     let program = glium::Program::from_source(&display, vertex_shader_src, fragment_shader_src,
                                               None).unwrap();
-
-    let mut scale_offset = ScaleOffset::new(min_time, max_time);
 
     let mut ptr_loc = 0.0;
 
@@ -814,16 +811,15 @@ fn read_events(path: impl AsRef<Path>) -> (Vec<TraceEvent>, Vec<TraceWakeup>) {
                     nanos: ts.as_nanos() as u64,
                     metadata: Some(serde_json::to_string(&metadata).unwrap()),
                 }),
-                JsonTraceEvent::ThreadStart { id: _, ts: _, name: _ } => {}
-                // JsonTraceEvent::ThreadStart { id, ts, name } => events.push(TraceEvent {
-                //     id,
-                //     end: WhichEnd::Begin,
-                //     kind: TraceKind::Thread,
-                //     parent: None,
-                //     name: Some(name),
-                //     nanos: ts.as_nanos() as u64,
-                //     metadata: None,
-                // }),
+                JsonTraceEvent::ThreadStart { id, ts, name } => events.push(TraceEvent {
+                    id,
+                    end: WhichEnd::Begin,
+                    kind: TraceKind::Thread,
+                    parent: None,
+                    name: Some(name),
+                    nanos: ts.as_nanos() as u64,
+                    metadata: None,
+                }),
                 JsonTraceEvent::AsyncOffCPU { id, ts,  } => events.push(TraceEvent {
                     id,
                     end: WhichEnd::End,
@@ -851,16 +847,15 @@ fn read_events(path: impl AsRef<Path>) -> (Vec<TraceEvent>, Vec<TraceWakeup>) {
                     nanos: ts.as_nanos() as u64,
                     metadata: None,
                 }),
-                JsonTraceEvent::ThreadEnd { id: _, ts: _,  } => {}
-                // JsonTraceEvent::ThreadEnd { id, ts,  } => events.push(TraceEvent {
-                //     id,
-                //     end: WhichEnd::End,
-                //     kind: TraceKind::Thread,
-                //     parent: None,
-                //     name: None,
-                //     nanos: ts.as_nanos() as u64,
-                //     metadata: None,
-                // }),
+                JsonTraceEvent::ThreadEnd { id, ts,  } => events.push(TraceEvent {
+                    id,
+                    end: WhichEnd::End,
+                    kind: TraceKind::Thread,
+                    parent: None,
+                    name: None,
+                    nanos: ts.as_nanos() as u64,
+                    metadata: None,
+                }),
                 JsonTraceEvent::Wakeup { waking_span, parked_span, ts } => wakeups.push(TraceWakeup {
                     waking_span,
                     parked_span,
