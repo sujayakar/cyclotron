@@ -91,6 +91,32 @@ impl Chunk {
             },
         };
     }
+
+    fn spans<'a>(&'a self) -> ChunkSpanIter<'a> {
+        ChunkSpanIter {
+            begins: &self.begins,
+            ends: &self.ends,
+        }
+    }
+}
+
+pub struct ChunkSpanIter<'a> {
+    begins: &'a [u64],
+    ends: &'a [u64],
+}
+
+impl<'a> Iterator for ChunkSpanIter<'a> {
+    type Item = Span;
+    fn next(&mut self) -> Option<Span> {
+        if self.begins.len() > 0 {
+            let res = Span { begin: self.begins[0], end: self.ends[0] };
+            self.begins = &self.begins[1..];
+            self.ends = &self.ends[1..];
+            Some(res)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -100,9 +126,9 @@ pub struct ThreadId(usize);
 pub struct RowId(usize);
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
-pub struct GroupId(u32);
+pub struct BoxListKey(pub ThreadId, pub RowId, pub bool);
 
-pub struct RowAssignment {
+struct RowAssignment {
     thread: ThreadId,
     row: RowId,
     children: Option<RowId>,
@@ -187,5 +213,40 @@ impl Layout {
         Layout {
             threads: b.threads,
         }
+    }
+
+    pub fn span_discounting_threads(&self) -> Span {
+        let mut begin = std::u64::MAX;
+        let mut end = 0;
+        for t in &self.threads {
+            for row in &t.rows {
+                begin = std::cmp::min(
+                    begin,
+                    *row.fore.begins.iter().chain(row.back.begins.iter()).min().unwrap());
+
+                end = std::cmp::max(
+                    end,
+                    *row.fore.ends.iter().chain(row.back.ends.iter()).max().unwrap());
+            }
+        }
+        Span {
+            begin,
+            end
+        }
+    }
+
+    pub fn iter_box_lists(&self) -> impl Iterator<Item=(BoxListKey, ChunkSpanIter)> {
+        self.threads.iter().enumerate().flat_map(|(tid, t)| {
+            t.rows.iter().enumerate().flat_map(move |(rid, r)| {
+                let mut res = Vec::new();
+                if r.fore.begins.len() > 0 {
+                    res.push((BoxListKey(ThreadId(tid), RowId(rid), false), r.fore.spans()));
+                }
+                if r.back.begins.len() > 0 {
+                    res.push((BoxListKey(ThreadId(tid), RowId(rid), true), r.back.spans()));
+                }
+                res.into_iter()
+            })
+        })
     }
 }
