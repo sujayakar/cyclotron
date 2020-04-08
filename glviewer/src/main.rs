@@ -3,10 +3,10 @@ mod layout;
 mod render;
 mod view;
 
-use crate::db::{Database, Span};
+use crate::db::{Database};
 use crate::layout::Layout;
 use crate::view::View;
-use crate::render::{RenderState, StaticRenderData};
+use crate::render::RenderState;
 
 use glium::{
     glutin,
@@ -36,9 +36,8 @@ fn main() {
         .with_multisampling(8);
     let display = glium::Display::new(wb, cb, &event_loop).unwrap();
 
-    let static_data = StaticRenderData::new(&display);
     let mut view = View::new(&layout);
-    let render = RenderState::new(static_data, &layout, &display);
+    let render = RenderState::new(&layout, &display);
 
 
     event_loop.run(move |event, _, control_flow| {

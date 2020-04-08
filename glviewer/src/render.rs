@@ -3,11 +3,11 @@ use crate::db::Span;
 use std::collections::HashMap;
 use crate::layout::{Layout, BoxListKey};
 use glium::{
-    glutin,
     Surface,
     Display,
     Program,
     Frame,
+    Depth,
     implement_vertex,
     uniform,
     index::{
@@ -16,6 +16,7 @@ use glium::{
     },
     vertex::VertexBuffer,
     draw_parameters::DepthTest,
+    DrawParameters,
 };
 
 #[derive(Copy, Clone)]
@@ -50,10 +51,22 @@ impl SimpleBoxData {
         }
     }
 
-    fn draw() {
-        // target.draw(&self.plain_rect, glium::index::NoIndices(PrimitiveType::TriangleStrip), &program,
-        //     &uniform! { scale: scale_vec, offset: offset_vec, item_color: [0.9f32, 0.9, 0.9, 1.0] },
-        //     &params).unwrap();
+    fn draw(
+        &self,
+        shaders: &Shaders,
+        params: &DrawParameters,
+        target: &mut Frame
+    ) {
+        target.draw(
+            &self.vertex,
+            glium::index::NoIndices(PrimitiveType::TriangleStrip),
+            &shaders.simple_box_program,
+            &uniform! {
+                scale: [1.0f32, 1.0],
+                offset: [0.0f32, 0.0],
+                item_color: [0.0f32, 0.9, 0.9, 1.0]
+            },
+            &params).unwrap();
     }
 }
 
@@ -100,14 +113,18 @@ impl BoxListData {
     }
 }
 
-pub struct StaticRenderData {
+struct StaticRenderData {
     simple_box: SimpleBoxData,
+    shaders: Shaders,
+}
+
+struct Shaders {
     simple_box_program: Program,
     box_list_program: Program,
 }
 
-impl StaticRenderData {
-    pub fn new(display: &Display) -> StaticRenderData {
+impl Shaders {
+    fn new(display: &Display) -> Shaders {
         let simple_box_program = {
             let vertex = r#"
                 #version 150
@@ -177,8 +194,7 @@ impl StaticRenderData {
             Program::from_source(display, vertex, fragment, None).unwrap()
         };
 
-        StaticRenderData {
-            simple_box: SimpleBoxData::new(display),
+        Shaders {
             simple_box_program,
             box_list_program,
         }
@@ -186,12 +202,13 @@ impl StaticRenderData {
 }
 
 pub struct RenderState {
-    static_data: StaticRenderData,
+    simple_box: SimpleBoxData,
+    shaders: Shaders,
     box_lists: HashMap<BoxListKey, BoxListData>,
 }
 
 impl RenderState {
-    pub fn new(static_data: StaticRenderData, layout: &Layout, display: &Display) -> RenderState {
+    pub fn new(layout: &Layout, display: &Display) -> RenderState {
         let mut box_lists = HashMap::new();
 
         for (key, items) in layout.iter_box_lists() {
@@ -199,12 +216,24 @@ impl RenderState {
         }
 
         RenderState {
-            static_data,
+            simple_box: SimpleBoxData::new(display),
+            shaders: Shaders::new(display),
             box_lists,
         }
     }
 
     pub fn draw(&self, view: &View, target: &mut Frame) {
-
+        let params = DrawParameters {
+            depth: Depth {
+                test: DepthTest::Overwrite,
+                write: true,
+                .. Default::default()
+            },
+            .. Default::default()
+        };
+        self.simple_box.draw(
+            &self.shaders,
+            &params,
+            target)
     }
 }
