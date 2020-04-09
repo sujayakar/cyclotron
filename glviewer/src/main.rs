@@ -80,7 +80,7 @@ fn main() {
         let mut target = display.draw();
         target.clear_color_and_depth((1.0, 1.0, 1.0, 1.0), 1.0);
 
-        render.draw(&view, &mut target);
+        render.draw(&layout, &view, &mut target);
 
         target.finish().unwrap();
     });

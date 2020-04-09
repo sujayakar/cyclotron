@@ -11,6 +11,12 @@ pub struct Span {
     pub end: u64,
 }
 
+impl Span {
+    pub fn intersects(self, other: Span) -> bool {
+        self.begin < other.end && self.end > other.begin
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct TaskId(pub u32);
 

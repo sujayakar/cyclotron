@@ -1,7 +1,7 @@
 use crate::view::View;
 use crate::db::Span;
 use std::collections::HashMap;
-use crate::layout::{Layout, BoxListKey};
+use crate::layout::{Layout, BoxListKey, SpanRange};
 use glium::{
     Surface,
     Display,
@@ -55,16 +55,34 @@ impl SimpleBoxData {
         &self,
         shaders: &Shaders,
         params: &DrawParameters,
-        target: &mut Frame
+        target: &mut Frame,
+        color: Color,
+        region: SimpleRegion,
     ) {
+        /*
+            left = offset * scale
+            right = scale + offset * scale
+
+            right - left = scale
+
+            left / (right - left) = offset
+
+        */
+
         target.draw(
             &self.vertex,
             glium::index::NoIndices(PrimitiveType::TriangleStrip),
             &shaders.simple_box_program,
             &uniform! {
-                scale: [1.0f32, 1.0],
-                offset: [0.0f32, 0.0],
-                item_color: [0.0f32, 0.9, 0.9, 1.0]
+                scale: [
+                    region.right - region.left,
+                    region.bottom - region.top,
+                ],
+                offset: [
+                    region.left / (region.right - region.left),
+                    region.top / (region.bottom - region.top),
+                ],
+                item_color: [color.r, color.g, color.b, color.a],
             },
             &params).unwrap();
     }
@@ -84,10 +102,10 @@ impl BoxListData {
             let s = verts.len() as u32;
             tris.extend(&[s, s+1, s+2, s+1, s+2, s+3]);
 
-            verts.push(BoxListVertex { position: [(span.begin as f32) / 1_000_000_000.0, 0.0] });
-            verts.push(BoxListVertex { position: [(span.end as f32) / 1_000_000_000.0, 0.0] });
-            verts.push(BoxListVertex { position: [(span.begin as f32) / 1_000_000_000.0, 1.0] });
-            verts.push(BoxListVertex { position: [(span.end as f32) / 1_000_000_000.0, 1.0] });
+            verts.push(BoxListVertex { position: [(span.begin as f32) / 1e9, 0.0] });
+            verts.push(BoxListVertex { position: [(span.end as f32) / 1e9, 0.0] });
+            verts.push(BoxListVertex { position: [(span.begin as f32) / 1e9, 1.0] });
+            verts.push(BoxListVertex { position: [(span.end as f32) / 1e9, 1.0] });
         }
 
         let vertex = VertexBuffer::new(display, &verts).unwrap();
@@ -99,17 +117,44 @@ impl BoxListData {
         }
     }
 
-    fn draw() {
-        // target.draw(&lane.vertex, &lane.index, &program,
-        //             &uniform! {
-        //                 scale: scale_vec,
-        //                 offset: offset_vec,
-        //                 item_color: [color.0, color.1, color.2, 1.0],
-        //                 parent_color: [1.0f32, 0.0, 1.0, 1.0],
-        //                 group_color: [0.0f32, 1.0, 0.0, 1.0],
-        //                 highlight_item: highlight_item,
-        //             },
-        //             &params).unwrap();
+    fn draw(
+        &self,
+        shaders: &Shaders,
+        params: &DrawParameters,
+        target: &mut Frame,
+        range: SpanRange,
+        color: Color,
+        region: Region,
+    ) {
+
+        /*
+        base = 100
+        limit = 105
+
+        1 = limit*scale + offset*scale
+        0 = base*scale + offset*scale
+
+        1 = (limit-base)*scale
+
+        limit-base = scale
+        */
+
+        target.draw(
+            &self.vertex,
+            &self.index,
+            &shaders.box_list_program,
+            &uniform! {
+                scale: [
+                    1.0 / (region.logical_limit - region.logical_base),
+                    region.vertical_limit - region.vertical_base,
+                ],
+                offset: [
+                    -region.logical_base,
+                    region.vertical_base / (region.vertical_limit - region.vertical_base),
+                ],
+                item_color: [color.r, color.g, color.b, color.a],
+            },
+            &params).unwrap();
     }
 }
 
@@ -153,8 +198,6 @@ impl Shaders {
         let box_list_program = {
             let vertex = r#"
                 #version 150
-                in uint parent_ident;
-                in uint group_ident;
                 in vec2 position;
 
                 uniform vec4 parent_color;
@@ -172,13 +215,7 @@ impl Shaders {
                     vec2 pos0_offset = pos0 - 0.5;
                     gl_Position = vec4(2*pos0_offset.x, -2*pos0_offset.y, 0.0, 1.0);
 
-                    if(highlight_item == parent_ident) {
-                        vert_color = parent_color;
-                    } else if(highlight_group == group_ident) {
-                        vert_color = group_color;
-                    } else {
-                        vert_color = item_color;
-                    }
+                    vert_color = item_color;
                 }
             "#;
 
@@ -199,6 +236,45 @@ impl Shaders {
             box_list_program,
         }
     }
+}
+
+#[derive(Copy, Clone)]
+pub struct Color {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct SimpleRegion {
+    pub left: f32,
+    pub right: f32,
+    pub top: f32,
+    pub bottom: f32,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Region {
+    pub vertical_base: f32,
+    pub vertical_limit: f32,
+
+    pub logical_base: f32,
+    pub logical_limit: f32,
+}
+
+#[derive(Copy, Clone)]
+pub enum DrawCommand {
+    SimpleBox {
+        color: Color,
+        region: SimpleRegion,
+    },
+    BoxList {
+        key: BoxListKey,
+        range: SpanRange,
+        color: Color,
+        region: Region,
+    },
 }
 
 pub struct RenderState {
@@ -222,7 +298,7 @@ impl RenderState {
         }
     }
 
-    pub fn draw(&self, view: &View, target: &mut Frame) {
+    pub fn draw(&self, layout: &Layout, view: &View, target: &mut Frame) {
         let params = DrawParameters {
             depth: Depth {
                 test: DepthTest::Overwrite,
@@ -231,9 +307,17 @@ impl RenderState {
             },
             .. Default::default()
         };
-        self.simple_box.draw(
-            &self.shaders,
-            &params,
-            target)
+
+        for cmd in view.draw_commands(&layout) {
+            match cmd {
+                DrawCommand::SimpleBox { color, region } => {
+                    self.simple_box.draw(&self.shaders, &params, target, color, region);
+                }
+                DrawCommand::BoxList { key, range, color, region } => {
+                    let data = &self.box_lists[&key];
+                    data.draw(&self.shaders, &params, target, range, color, region);
+                }
+            }
+        }
     }
 }

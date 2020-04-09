@@ -2,29 +2,43 @@
 use crate::db::{Database, TaskId, Task, Span};
 
 pub struct Layout {
-    threads: Vec<Thread>,
+    pub threads: Vec<Thread>,
 }
 
 pub struct Thread {
-    rows: Vec<Row>,
+    pub rows: Vec<Row>,
+}
+
+#[derive(Copy, Clone)]
+pub struct SpanRange {
+    pub begin: usize,
+    pub end: usize,
 }
 
 impl Thread {
-    fn find_row(&mut self, span: Span) -> RowId {
-        let id = self.rows.len();
-        for (id, row) in self.rows.iter().enumerate() {
-            if !row.back.has_overlap(span) && !row.fore.has_overlap(span) && !row.reserve.has_overlap(span) {
-                return RowId(id);
+    fn find_row(&mut self, span: Span, is_thread: bool) -> RowId {
+        if !is_thread {
+            for (id, row) in self.rows.iter().enumerate() {
+                if !row.back.has_overlap(span) && !row.fore.has_overlap(span) && !row.reserve.has_overlap(span) {
+                    return RowId(id);
+                }
             }
         }
-        self.rows.push(Row { fore: Chunk::new(), back: Chunk::new(), reserve: Chunk::new() });
+        let id = self.rows.len();
+        self.rows.push(Row {
+            is_thread,
+            fore: Chunk::new(),
+            back: Chunk::new(),
+            reserve: Chunk::new()
+        });
         RowId(id)
     }
 }
 
 pub struct Row {
-    fore: Chunk,
-    back: Chunk,
+    is_thread: bool,
+    pub fore: Chunk,
+    pub back: Chunk,
     reserve: Chunk,
 }
 
@@ -44,9 +58,10 @@ impl Row {
     }
 }
 
+#[derive(Clone)]
 pub struct Chunk {
-    begins: Vec<u64>,
-    ends: Vec<u64>,
+    pub begins: Vec<u64>,
+    pub ends: Vec<u64>,
     tasks: Vec<TaskId>,
 }
 
@@ -59,37 +74,35 @@ impl Chunk {
         }
     }
 
-    fn has_overlap(&self, span: Span) -> bool {
-        let begin = match self.ends.binary_search(&span.begin) {
-            Ok(index) => index,
-            Err(index) => {
-                if index == self.ends.len() {
-                    return false;
-                }
-                index
-            },
+    pub fn has_overlap(&self, span: Span) -> bool {
+        let index = match self.ends.binary_search(&span.begin) {
+            Ok(index) => index + 1,
+            Err(index) => index,
         };
-        self.begins[begin] <= span.end
+        if index == self.ends.len() {
+            false
+        } else {
+            self.begins[index] < span.end
+        }
     }
 
     fn add(&mut self, span: Span, tid: TaskId) {
-
-        match self.ends.binary_search(&span.begin) {
-            Ok(index) => panic!(),
-            Err(index) => {
-                if index == self.ends.len() {
-                    self.begins.push(span.begin);
-                    self.ends.push(span.end);
-                    self.tasks.push(tid);
-                } else {
-                    assert!(self.begins[index] > span.end);
-
-                    self.begins.insert(index, span.begin);
-                    self.ends.insert(index, span.end);
-                    self.tasks.insert(index, tid);
-                }
-            },
+        let index = match self.ends.binary_search(&span.begin) {
+            Ok(index) => index + 1,
+            Err(index) => index,
         };
+
+        if index == self.ends.len() {
+            self.begins.push(span.begin);
+            self.ends.push(span.end);
+            self.tasks.push(tid);
+        } else {
+            assert!(self.begins[index] >= span.end);
+
+            self.begins.insert(index, span.begin);
+            self.ends.insert(index, span.end);
+            self.tasks.insert(index, tid);
+        }
     }
 
     fn spans<'a>(&'a self) -> ChunkSpanIter<'a> {
@@ -98,6 +111,27 @@ impl Chunk {
             ends: &self.ends,
         }
     }
+}
+
+#[test]
+fn test_has_overlap() {
+    let chunk = Chunk {
+        begins: vec![1, 3, 10],
+        ends:   vec![2, 5, 15],
+        tasks: vec![TaskId(1), TaskId(2), TaskId(3)],
+    };
+    assert!(chunk.has_overlap(Span { begin: 0, end: 20 }));
+    assert!(!chunk.has_overlap(Span { begin: 2, end: 3 }));
+    assert!(chunk.has_overlap(Span { begin: 2, end: 4 }));
+    assert!(chunk.has_overlap(Span { begin: 4, end: 5 }));
+    assert!(chunk.has_overlap(Span { begin: 4, end: 6 }));
+    assert!(!chunk.has_overlap(Span { begin: 6, end: 7 }));
+    assert!(!chunk.has_overlap(Span { begin: 17, end: 30 }));
+
+    let mut c = chunk.clone();
+    c.add(Span { begin: 2, end: 3 }, TaskId(5));
+    assert_eq!(c.begins, vec![1, 2, 3, 10]);
+    assert_eq!(c.ends,   vec![2, 3, 5, 15]);
 }
 
 pub struct ChunkSpanIter<'a> {
@@ -119,13 +153,13 @@ impl<'a> Iterator for ChunkSpanIter<'a> {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
-pub struct ThreadId(usize);
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct ThreadId(pub usize);
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
-pub struct RowId(usize);
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct RowId(pub usize);
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct BoxListKey(pub ThreadId, pub RowId, pub bool);
 
 struct RowAssignment {
@@ -161,18 +195,18 @@ impl LayoutBuilder {
             let row_id = self.assignments[parent.0 as usize].children.unwrap();
             let row = &thread.rows[row_id.0];
             if row.fore.has_overlap(task.span) || row.back.has_overlap(task.span) {
-                thread.find_row(task.span)
+                thread.find_row(task.span, task.parent.is_none())
             } else {
                 row_id
             }
         } else {
-            thread.find_row(task.span)
+            thread.find_row(task.span, task.parent.is_none())
         };
 
         thread.rows[row.0].add(task);
 
         let children = if self.children[task.id.0 as usize].len() > 0 {
-            let child_row = thread.find_row(task.span);
+            let child_row = thread.find_row(task.span, task.parent.is_none());
             thread.rows[child_row.0].reserve.add(task.span, task.id);
             Some(child_row)
         } else {
@@ -215,18 +249,39 @@ impl Layout {
         }
     }
 
+    pub fn smallest_span_len(&self) -> u64 {
+        let mut min = std::u64::MAX;
+
+        for t in &self.threads {
+            for row in &t.rows {
+                if !row.is_thread {
+                    let spans = row.fore.begins.iter().zip(row.fore.ends.iter())
+                        .chain(row.back.begins.iter().zip(row.back.ends.iter()));
+
+                    min = std::cmp::min(
+                        min,
+                        spans.map(|(a, b)| b-a).min().unwrap());
+                }
+            }
+        }
+
+        min
+    }
+
     pub fn span_discounting_threads(&self) -> Span {
         let mut begin = std::u64::MAX;
         let mut end = 0;
         for t in &self.threads {
             for row in &t.rows {
-                begin = std::cmp::min(
-                    begin,
-                    *row.fore.begins.iter().chain(row.back.begins.iter()).min().unwrap());
+                if !row.is_thread {
+                    begin = std::cmp::min(
+                        begin,
+                        *row.fore.begins.iter().chain(row.back.begins.iter()).min().unwrap());
 
-                end = std::cmp::max(
-                    end,
-                    *row.fore.ends.iter().chain(row.back.ends.iter()).max().unwrap());
+                    end = std::cmp::max(
+                        end,
+                        *row.fore.ends.iter().chain(row.back.ends.iter()).max().unwrap());
+                }
             }
         }
         Span {
