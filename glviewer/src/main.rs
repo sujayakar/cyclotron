@@ -52,9 +52,12 @@ fn main() {
                 },
                 glutin::event::WindowEvent::CursorMoved { position, .. } => {
                     let dims = display.get_framebuffer_dimensions();
-                    view.hover((position.x / dims.0 as f64, position.y / dims.1 as f64));
+                    view.hover(&layout, (position.x / dims.0 as f64, position.y / dims.1 as f64));
                 }
-                _ => return,
+                _ => {
+                    // println!("{:?}", event);
+                    return
+                },
             },
             glutin::event::Event::NewEvents(cause) => match cause {
                 glutin::event::StartCause::ResumeTimeReached { .. } => (),

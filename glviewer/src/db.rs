@@ -18,13 +18,36 @@ impl Span {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct NameId(pub u32);
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct TaskId(pub u32);
 
 pub struct Task {
     pub id: TaskId,
     pub parent: Option<TaskId>,
+    pub name: NameId,
     pub span: Span,
     pub on_cpu: Option<Vec<Span>>,
+}
+
+struct NameTable {
+    by_name: HashMap<String, NameId>,
+    names: Vec<String>,
+}
+
+impl NameTable {
+    fn new() -> NameTable {
+        NameTable {
+            by_name: HashMap::new(),
+            names: Vec::new(),
+        }
+    }
+
+    fn insert(&mut self, name: String) -> NameId {
+        let id = NameId(self.names.len() as u32);
+        *self.by_name.entry(name).or_insert(id)
+    }
 }
 
 pub struct Database {
@@ -37,6 +60,7 @@ impl Database {
         let mut tasks = Vec::new();
         let mut unterminated = Vec::new();
         let mut task_ids = HashMap::new();
+        let mut names = NameTable::new();
         let mut file = BufReader::new(File::open(path).unwrap());
 
         loop {
@@ -55,6 +79,7 @@ impl Database {
                         tasks.push(Task {
                             id: tid,
                             parent: Some(parent),
+                            name: names.insert(name),
                             span: Span { begin: ts.as_nanos() as u64, end: std::u64::MAX },
                             on_cpu: Some(Vec::new()),
                         });
@@ -83,6 +108,7 @@ impl Database {
                         tasks.push(Task {
                             id: tid,
                             parent: Some(parent),
+                            name: names.insert(name),
                             span: Span { begin: ts.as_nanos() as u64, end: std::u64::MAX },
                             on_cpu: None,
                         });
@@ -100,6 +126,7 @@ impl Database {
                         tasks.push(Task {
                             id: tid,
                             parent: None,
+                            name: names.insert(name),
                             span: Span { begin: ts.as_nanos() as u64, end: std::u64::MAX },
                             on_cpu: None,
                         });

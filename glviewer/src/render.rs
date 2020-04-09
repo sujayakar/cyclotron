@@ -1,5 +1,5 @@
 use crate::view::View;
-use crate::db::Span;
+use crate::db::{Span, NameId};
 use std::collections::HashMap;
 use crate::layout::{Layout, BoxListKey, SpanRange};
 use glium::{
@@ -28,9 +28,9 @@ implement_vertex!(SimpleBoxVertex, position);
 #[derive(Copy, Clone)]
 struct BoxListVertex {
     position: [f32; 2],
-    // parent_ident: u32,
+    group_ident: u32,
 }
-implement_vertex!(BoxListVertex, position);
+implement_vertex!(BoxListVertex, position, group_ident);
 
 struct SimpleBoxData {
     vertex: VertexBuffer<SimpleBoxVertex>,
@@ -94,18 +94,19 @@ struct BoxListData {
 }
 
 impl BoxListData {
-    fn from_iter(display: &Display, spans: impl Iterator<Item=Span>) -> BoxListData {
+    fn from_iter(display: &Display, spans: impl Iterator<Item=(NameId, Span)>) -> BoxListData {
         let mut verts = Vec::new();
         let mut tris = Vec::<u32>::new();
 
-        for span in spans {
+        for (name, span) in spans {
+            let group_ident = name.0;
             let s = verts.len() as u32;
             tris.extend(&[s, s+1, s+2, s+1, s+2, s+3]);
 
-            verts.push(BoxListVertex { position: [(span.begin as f32) / 1e9, 0.0] });
-            verts.push(BoxListVertex { position: [(span.end as f32) / 1e9, 0.0] });
-            verts.push(BoxListVertex { position: [(span.begin as f32) / 1e9, 1.0] });
-            verts.push(BoxListVertex { position: [(span.end as f32) / 1e9, 1.0] });
+            verts.push(BoxListVertex { position: [(span.begin as f32) / 1e9, 0.0], group_ident });
+            verts.push(BoxListVertex { position: [(span.end as f32) / 1e9, 0.0], group_ident });
+            verts.push(BoxListVertex { position: [(span.begin as f32) / 1e9, 1.0], group_ident });
+            verts.push(BoxListVertex { position: [(span.end as f32) / 1e9, 1.0], group_ident });
         }
 
         let vertex = VertexBuffer::new(display, &verts).unwrap();
@@ -138,10 +139,11 @@ impl BoxListData {
 
         limit-base = scale
         */
+        let selection_index_buf = self.index.slice(6*range.begin .. 6*range.end).unwrap();
 
         target.draw(
             &self.vertex,
-            &self.index,
+            &selection_index_buf,
             &shaders.box_list_program,
             &uniform! {
                 scale: [

@@ -1,5 +1,5 @@
 
-use crate::db::{Database, TaskId, Task, Span};
+use crate::db::{Database, TaskId, Task, Span, NameId};
 
 pub struct Layout {
     pub threads: Vec<Thread>,
@@ -45,14 +45,14 @@ pub struct Row {
 impl Row {
     fn add(&mut self, task: &Task) {
         if let Some(on_cpu) = task.on_cpu.as_ref() {
-            self.back.add(task.span, task.id);
+            self.back.add(task.span, task.name, task.id);
             assert!(!self.fore.has_overlap(task.span));
             
             for span in on_cpu {
-                self.fore.add(*span, task.id);
+                self.fore.add(*span, task.name, task.id);
             }
         } else {
-            self.fore.add(task.span, task.id);
+            self.fore.add(task.span, task.name, task.id);
             assert!(!self.back.has_overlap(task.span));
         }
     }
@@ -62,6 +62,7 @@ impl Row {
 pub struct Chunk {
     pub begins: Vec<u64>,
     pub ends: Vec<u64>,
+    pub names: Vec<NameId>,
     tasks: Vec<TaskId>,
 }
 
@@ -70,6 +71,7 @@ impl Chunk {
         Chunk {
             begins: Vec::new(),
             ends: Vec::new(),
+            names: Vec::new(),
             tasks: Vec::new(),
         }
     }
@@ -86,7 +88,21 @@ impl Chunk {
         }
     }
 
-    fn add(&mut self, span: Span, tid: TaskId) {
+    pub fn find(&self, val: u64) -> Option<usize> {
+        let index = match self.ends.binary_search(&val) {
+            Ok(index) => index + 1,
+            Err(index) => index,
+        };
+        if index == self.ends.len() {
+            None
+        } else if self.begins[index] <= val {
+            Some(index)
+        } else {
+            None
+        }
+    }
+
+    fn add(&mut self, span: Span, nid: NameId, tid: TaskId) {
         let index = match self.ends.binary_search(&span.begin) {
             Ok(index) => index + 1,
             Err(index) => index,
@@ -95,12 +111,14 @@ impl Chunk {
         if index == self.ends.len() {
             self.begins.push(span.begin);
             self.ends.push(span.end);
+            self.names.push(nid);
             self.tasks.push(tid);
         } else {
             assert!(self.begins[index] >= span.end);
 
             self.begins.insert(index, span.begin);
             self.ends.insert(index, span.end);
+            self.names.insert(index, nid);
             self.tasks.insert(index, tid);
         }
     }
@@ -109,6 +127,7 @@ impl Chunk {
         ChunkSpanIter {
             begins: &self.begins,
             ends: &self.ends,
+            names: &self.names,
         }
     }
 }
@@ -118,6 +137,7 @@ fn test_has_overlap() {
     let chunk = Chunk {
         begins: vec![1, 3, 10],
         ends:   vec![2, 5, 15],
+        names: vec![NameId(1), NameId(1), NameId(1)],
         tasks: vec![TaskId(1), TaskId(2), TaskId(3)],
     };
     assert!(chunk.has_overlap(Span { begin: 0, end: 20 }));
@@ -129,7 +149,7 @@ fn test_has_overlap() {
     assert!(!chunk.has_overlap(Span { begin: 17, end: 30 }));
 
     let mut c = chunk.clone();
-    c.add(Span { begin: 2, end: 3 }, TaskId(5));
+    c.add(Span { begin: 2, end: 3 }, NameId(2), TaskId(5));
     assert_eq!(c.begins, vec![1, 2, 3, 10]);
     assert_eq!(c.ends,   vec![2, 3, 5, 15]);
 }
@@ -137,15 +157,20 @@ fn test_has_overlap() {
 pub struct ChunkSpanIter<'a> {
     begins: &'a [u64],
     ends: &'a [u64],
+    names: &'a [NameId],
 }
 
 impl<'a> Iterator for ChunkSpanIter<'a> {
-    type Item = Span;
-    fn next(&mut self) -> Option<Span> {
+    type Item = (NameId, Span);
+    fn next(&mut self) -> Option<(NameId, Span)> {
         if self.begins.len() > 0 {
-            let res = Span { begin: self.begins[0], end: self.ends[0] };
+            let res = (
+                self.names[0],
+                Span { begin: self.begins[0], end: self.ends[0] },
+            );
             self.begins = &self.begins[1..];
             self.ends = &self.ends[1..];
+            self.names = &self.names[1..];
             Some(res)
         } else {
             None
@@ -207,7 +232,7 @@ impl LayoutBuilder {
 
         let children = if self.children[task.id.0 as usize].len() > 0 {
             let child_row = thread.find_row(task.span, task.parent.is_none());
-            thread.rows[child_row.0].reserve.add(task.span, task.id);
+            thread.rows[child_row.0].reserve.add(task.span, task.name, task.id);
             Some(child_row)
         } else {
             None
