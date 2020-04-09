@@ -39,6 +39,7 @@ fn main() {
     let mut view = View::new(&layout);
     let render = RenderState::new(&layout, &display);
 
+    let mut last_name = None;
 
     event_loop.run(move |event, _, control_flow| {
         let next_frame_time = Instant::now() + Duration::from_nanos(16_666_667);
@@ -75,6 +76,13 @@ fn main() {
             },
             _ => {
                 return;
+            }
+        }
+
+        if let Some(selected) = view.selected_name() {
+            if last_name != Some(selected) {
+                println!("{:?}", db.name(selected));
+                last_name = Some(selected);
             }
         }
 

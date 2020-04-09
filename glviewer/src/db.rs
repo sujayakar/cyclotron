@@ -55,10 +55,16 @@ impl NameTable {
 }
 
 pub struct Database {
+    names: NameTable,
     pub tasks: Vec<Task>,
 }
 
 impl Database {
+
+    pub fn name(&self, name: NameId) -> &str {
+        self.names.names[name.0 as usize].as_str()
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Database {
         let mut closed = BitSet::new();
         let mut tasks = Vec::new();
@@ -148,6 +154,7 @@ impl Database {
         }
 
         Database {
+            names,
             tasks,
         }
     }

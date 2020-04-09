@@ -42,6 +42,10 @@ impl View {
         }
     }
 
+    pub fn selected_name(&self) -> Option<NameId> {
+        self.derived.selection.map(|(_, name, _)| name)
+    }
+
     pub fn hover(&mut self, layout: &Layout, coord: (f64, f64)) {
         self.cursor = coord;
         self.derived.selection = find_selection(self.cursor, self.span, &self.derived.rows, layout);
