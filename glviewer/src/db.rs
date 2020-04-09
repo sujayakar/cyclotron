@@ -45,8 +45,12 @@ impl NameTable {
     }
 
     fn insert(&mut self, name: String) -> NameId {
-        let id = NameId(self.names.len() as u32);
-        *self.by_name.entry(name).or_insert(id)
+        let names = &mut self.names;
+        *self.by_name.entry(name.clone()).or_insert_with(|| {
+            let id = NameId(names.len() as u32);
+            names.push(name);
+            id
+        })
     }
 }
 

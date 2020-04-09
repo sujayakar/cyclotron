@@ -125,6 +125,7 @@ impl BoxListData {
         target: &mut Frame,
         range: SpanRange,
         color: Color,
+        name_highlight: Option<(NameId, Color)>,
         region: Region,
     ) {
 
@@ -139,11 +140,12 @@ impl BoxListData {
 
         limit-base = scale
         */
-        let selection_index_buf = self.index.slice(6*range.begin .. 6*range.end).unwrap();
+        let group = name_highlight.map(|n| (n.0).0).unwrap_or(0);
+        let group_color = name_highlight.map(|n| n.1).unwrap_or(color);
 
         target.draw(
             &self.vertex,
-            &selection_index_buf,
+            &self.index.slice(6*range.begin .. 6*range.end).unwrap(),
             &shaders.box_list_program,
             &uniform! {
                 scale: [
@@ -155,6 +157,8 @@ impl BoxListData {
                     region.vertical_base / (region.vertical_limit - region.vertical_base),
                 ],
                 item_color: [color.r, color.g, color.b, color.a],
+                highlight_group: group,
+                group_color: [group_color.r, group_color.g, group_color.b, group_color.a],
             },
             &params).unwrap();
     }
@@ -201,13 +205,12 @@ impl Shaders {
             let vertex = r#"
                 #version 150
                 in vec2 position;
+                in uint group_ident;
 
-                uniform vec4 parent_color;
                 uniform vec4 group_color;
                 uniform vec4 item_color;
                 uniform vec2 scale;
                 uniform vec2 offset;
-                uniform uint highlight_item;
                 uniform uint highlight_group;
                 
                 out vec4 vert_color;
@@ -217,7 +220,11 @@ impl Shaders {
                     vec2 pos0_offset = pos0 - 0.5;
                     gl_Position = vec4(2*pos0_offset.x, -2*pos0_offset.y, 0.0, 1.0);
 
-                    vert_color = item_color;
+                    if(highlight_group == group_ident) {
+                        vert_color = group_color;
+                    } else {
+                        vert_color = item_color;
+                    }
                 }
             "#;
 
@@ -275,6 +282,7 @@ pub enum DrawCommand {
         key: BoxListKey,
         range: SpanRange,
         color: Color,
+        name_highlight: Option<(NameId, Color)>,
         region: Region,
     },
 }
@@ -315,9 +323,9 @@ impl RenderState {
                 DrawCommand::SimpleBox { color, region } => {
                     self.simple_box.draw(&self.shaders, &params, target, color, region);
                 }
-                DrawCommand::BoxList { key, range, color, region } => {
+                DrawCommand::BoxList { key, range, color, name_highlight, region } => {
                     let data = &self.box_lists[&key];
-                    data.draw(&self.shaders, &params, target, range, color, region);
+                    data.draw(&self.shaders, &params, target, range, color, name_highlight, region);
                 }
             }
         }

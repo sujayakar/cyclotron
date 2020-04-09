@@ -1,4 +1,4 @@
-use crate::db::Span;
+use crate::db::{Span, NameId};
 use crate::layout::{Layout, ThreadId, RowId, BoxListKey, SpanRange};
 use crate::render::{DrawCommand, Color, Region};
 
@@ -12,7 +12,7 @@ pub struct View {
 
 struct Derived {
     rows: Vec<Row>,
-    selection: Option<(BoxListKey, usize)>,
+    selection: Option<(BoxListKey, NameId, usize)>,
 }
 
 fn bounded(a: u64, b: u64, c: u64) -> u64 {
@@ -81,6 +81,13 @@ impl View {
         let mut res = Vec::new();
 
         if let Some(total) = self.derived.rows.last().map(|r| r.limit) {
+
+            let name_highlight = if let Some((_, name, _)) = self.derived.selection {
+                Some((name, Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 }))
+            } else {
+                None
+            };
+
             for row in &self.derived.rows {
                 let region = Region {
                     logical_base: (self.span.begin as f32) / 1e9,
@@ -95,15 +102,17 @@ impl View {
                         key: subrow.key,
                         color: subrow.color,
                         range: subrow.range,
+                        name_highlight,
                         region,
                     });
 
-                    if let Some((key, index)) = self.derived.selection {
+                    if let Some((key, _, index)) = self.derived.selection {
                         if key == subrow.key {
                             res.push(DrawCommand::BoxList {
                                 key,
                                 color: Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
                                 range: SpanRange { begin: index, end: index + 1 },
+                                name_highlight: None,
                                 region,
                             })
                         }
@@ -149,7 +158,7 @@ fn rows(span: Span, layout: &Layout) -> Vec<Row> {
     res
 }
 
-fn find_selection(cursor: (f64, f64), span: Span, rows: &[Row], layout: &Layout) -> Option<(BoxListKey, usize)> {
+fn find_selection(cursor: (f64, f64), span: Span, rows: &[Row], layout: &Layout) -> Option<(BoxListKey, NameId, usize)> {
     let x_value = (cursor.0 * (span.end - span.begin) as f64) as u64 + span.begin;
 
     if let Some(total) = rows.last().map(|r| r.limit) {
@@ -170,7 +179,7 @@ fn find_selection(cursor: (f64, f64), span: Span, rows: &[Row], layout: &Layout)
                 };
 
                 if let Some(index) = chunk.find(x_value) {
-                    return Some((key, index));
+                    return Some((key, chunk.names[index], index));
                 }
             }
         }
