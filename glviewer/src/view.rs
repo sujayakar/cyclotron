@@ -4,6 +4,7 @@ use crate::render::{DrawCommand, Color, Region, SimpleRegion};
 
 pub struct View {
     cursor: (f64, f64),
+    rows: Vec<Row>,
     limits: Span,
     smallest_span_len: u64,
     span: Span,
@@ -28,6 +29,7 @@ impl View {
         let limits = layout.span_discounting_threads();
         View {
             cursor: (0.0, 0.0),
+            rows: rows(limits, layout),
             limits,
             smallest_span_len: std::cmp::max(1, layout.smallest_span_len()),
             span: limits,
@@ -35,11 +37,10 @@ impl View {
     }
 
     pub fn hover(&mut self, coord: (f64, f64)) {
-        println!("{:?}", coord);
         self.cursor = coord;
     }
 
-    pub fn scroll(&mut self, offset: f64, scale: f64) {
+    pub fn scroll(&mut self, layout: &Layout, offset: f64, scale: f64) {
 
         let factor = 1.05f64.powf(-scale / 1e1);
 
@@ -63,45 +64,17 @@ impl View {
         let new_begin = lerp(begin, end - new_width, cursor);
         let new_end = new_begin + new_width;
 
-        println!(" ({}) -> {} {}", factor, new_begin / 1e9, new_end / 1e9);
-
         self.span.begin = bounded(self.limits.begin, new_begin as u64, self.limits.end - min_width as u64);
         self.span.end = bounded(self.span.begin + min_width as u64, new_end as u64, self.limits.end);
-    }
 
-    fn rows(&self, layout: &Layout) -> Vec<Row> {
-        let mut res = Vec::new();
-        let mut base = 0.0;
-
-        for (tid, t) in layout.threads.iter().enumerate() {
-            for (rid, r) in t.rows.iter().enumerate() {
-                for (ch, val, alpha) in &[(&r.back, true, 0.5), (&r.fore, false, 1.0)] {
-                    if ch.has_overlap(self.span) {
-                        res.push(Row {
-                            key: BoxListKey(ThreadId(tid), RowId(rid), *val),
-                            color: Color { r: 1.0, g: 0.0, b: 0.0, a: *alpha },
-                            // TODO: sub-select a range
-                            range: SpanRange { begin: 0, end: ch.begins.len() },
-                            base,
-                            limit: base + 1.0,
-                        });
-                        base += 1.0;
-                    }
-                }
-            }
-        }
-
-        println!("rows {:?}", res.len());
-
-        res
+        self.rows = rows(self.span, layout);
     }
 
     pub fn draw_commands(&self, layout: &Layout) -> Vec<DrawCommand> {
         let mut res = Vec::new();
 
-        let rows = self.rows(layout);
-        if let Some(total) = rows.last().map(|r| r.limit) {
-            for row in &rows {
+        if let Some(total) = self.rows.last().map(|r| r.limit) {
+            for row in &self.rows {
                 res.push(DrawCommand::BoxList {
                     key: row.key,
                     color: row.color,
@@ -119,6 +92,31 @@ impl View {
 
         res
     }
+}
+
+fn rows(span: Span, layout: &Layout) -> Vec<Row> {
+    let mut res = Vec::new();
+    let mut base = 0.0;
+
+    for (tid, t) in layout.threads.iter().enumerate() {
+        for (rid, r) in t.rows.iter().enumerate() {
+            for (ch, val, alpha) in &[(&r.back, true, 0.5), (&r.fore, false, 1.0)] {
+                if ch.has_overlap(span) {
+                    res.push(Row {
+                        key: BoxListKey(ThreadId(tid), RowId(rid), *val),
+                        color: Color { r: 1.0, g: 0.0, b: 0.0, a: *alpha },
+                        // TODO: sub-select a range
+                        range: SpanRange { begin: 0, end: ch.begins.len() },
+                        base,
+                        limit: base + 1.0,
+                    });
+                    base += 1.0;
+                }
+            }
+        }
+    }
+
+    res
 }
 
 struct Row {

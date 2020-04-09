@@ -66,7 +66,7 @@ fn main() {
             glutin::event::Event::DeviceEvent { event, .. } => match event {
                 glutin::event::DeviceEvent::MouseWheel { delta: 
                     glutin::event::MouseScrollDelta::PixelDelta(delta) } => {
-                    view.scroll(delta.x, delta.y);
+                    view.scroll(&layout, delta.x, delta.y);
                 }
                 _ => {}
             },
