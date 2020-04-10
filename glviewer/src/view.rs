@@ -52,12 +52,14 @@ impl View {
     }
 
     pub fn scroll(&mut self, layout: &Layout, offset: f64, scale: f64) {
-
         let factor = 1.05f64.powf(-scale / 1e1);
 
         let cursor = self.cursor.0;
+
         let begin = self.span.begin as f64;
         let end = self.span.end as f64;
+
+        let x_delta = - offset * (end - begin) / 1000.0;
 
         let mut new_width = (end - begin) * factor;
 
@@ -72,7 +74,7 @@ impl View {
             new_width = max_width;
         }
 
-        let new_begin = lerp(begin, end - new_width, cursor);
+        let new_begin = lerp(begin + x_delta, end - new_width + x_delta, cursor);
         let new_end = new_begin + new_width;
 
         self.span.begin = bounded(self.limits.begin, new_begin as u64, self.limits.end - min_width as u64);
