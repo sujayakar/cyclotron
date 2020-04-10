@@ -188,8 +188,8 @@ pub struct RowId(pub usize);
 pub struct BoxListKey(pub ThreadId, pub RowId, pub bool);
 
 struct RowAssignment {
-    thread: ThreadId,
-    row: RowId,
+    // thread: ThreadId,
+    // row: RowId,
     children: Option<RowId>,
 }
 
@@ -240,8 +240,8 @@ impl LayoutBuilder {
 
         assert!(self.assignments.len() == task.id.0 as usize);
         self.assignments.push(RowAssignment {
-            thread: thread_id,
-            row,
+            // thread: thread_id,
+            // row,
             children,
         });
     }
@@ -272,25 +272,6 @@ impl Layout {
         Layout {
             threads: b.threads,
         }
-    }
-
-    pub fn smallest_span_len(&self) -> u64 {
-        let mut min = std::u64::MAX;
-
-        for t in &self.threads {
-            for row in &t.rows {
-                if !row.is_thread {
-                    let spans = row.fore.begins.iter().zip(row.fore.ends.iter())
-                        .chain(row.back.begins.iter().zip(row.back.ends.iter()));
-
-                    min = std::cmp::min(
-                        min,
-                        spans.map(|(a, b)| b-a).min().unwrap());
-                }
-            }
-        }
-
-        min
     }
 
     pub fn span_discounting_threads(&self) -> Span {

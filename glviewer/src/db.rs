@@ -11,12 +11,6 @@ pub struct Span {
     pub end: u64,
 }
 
-impl Span {
-    pub fn intersects(self, other: Span) -> bool {
-        self.begin < other.end && self.end > other.begin
-    }
-}
-
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct NameId(pub u32);
 
@@ -82,7 +76,7 @@ impl Database {
             } else {
                 buf.pop();
                 match serde_json::from_str(&buf).unwrap() {
-                    JsonTraceEvent::AsyncStart { id, ts, name, parent_id, metadata } => {
+                    JsonTraceEvent::AsyncStart { id, ts, name, parent_id, metadata: _ } => {
                         let tid = TaskId(task_ids.len() as u32);
                         assert!(task_ids.insert(id, tid).is_none());
                         let parent = task_ids[&parent_id];
@@ -105,13 +99,13 @@ impl Database {
                         let end = ts.as_nanos() as u64;
                         tasks[tid.0 as usize].on_cpu.as_mut().unwrap().push(Span { begin, end });
                     }
-                    JsonTraceEvent::AsyncEnd { id, ts, outcome } => {
+                    JsonTraceEvent::AsyncEnd { id, ts, outcome: _ } => {
                         let tid = task_ids[&id];
                         assert!(!closed.contains(tid.0 as usize));
                         closed.insert(tid.0 as usize);
                         tasks[tid.0 as usize].span.end = ts.as_nanos() as u64;
                     }
-                    JsonTraceEvent::SyncStart { id, ts, name, parent_id, metadata } => {
+                    JsonTraceEvent::SyncStart { id, ts, name, parent_id, metadata: _ } => {
                         let tid = TaskId(task_ids.len() as u32);
                         assert!(task_ids.insert(id, tid).is_none());
                         let parent = task_ids[&parent_id];
@@ -148,7 +142,7 @@ impl Database {
                         closed.insert(tid.0 as usize);
                         tasks[tid.0 as usize].span.end = ts.as_nanos() as u64;
                     }
-                    JsonTraceEvent::Wakeup { waking_span, parked_span, ts } => {}
+                    JsonTraceEvent::Wakeup { waking_span: _, parked_span: _, ts: _ } => {}
                 }
             }
         }

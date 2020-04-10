@@ -164,11 +164,6 @@ impl BoxListData {
     }
 }
 
-struct StaticRenderData {
-    simple_box: SimpleBoxData,
-    shaders: Shaders,
-}
-
 struct Shaders {
     simple_box_program: Program,
     box_list_program: Program,
@@ -274,6 +269,7 @@ pub struct Region {
 
 #[derive(Copy, Clone)]
 pub enum DrawCommand {
+    #[allow(unused)]
     SimpleBox {
         color: Color,
         region: SimpleRegion,
@@ -308,7 +304,7 @@ impl RenderState {
         }
     }
 
-    pub fn draw(&self, layout: &Layout, view: &View, target: &mut Frame) {
+    pub fn draw(&self, view: &View, target: &mut Frame) {
         let params = DrawParameters {
             depth: Depth {
                 test: DepthTest::Overwrite,
@@ -318,7 +314,7 @@ impl RenderState {
             .. Default::default()
         };
 
-        for cmd in view.draw_commands(&layout) {
+        for cmd in view.draw_commands() {
             match cmd {
                 DrawCommand::SimpleBox { color, region } => {
                     self.simple_box.draw(&self.shaders, &params, target, color, region);

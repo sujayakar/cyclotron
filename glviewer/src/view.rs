@@ -6,7 +6,6 @@ pub struct View {
     cursor: (f64, f64),
     derived: Derived,
     limits: Span,
-    smallest_span_len: u64,
     span: Span,
 }
 
@@ -37,7 +36,6 @@ impl View {
             cursor,
             derived: derived(cursor, limits, layout),
             limits,
-            smallest_span_len: std::cmp::max(1, layout.smallest_span_len()),
             span: limits,
         }
     }
@@ -83,7 +81,7 @@ impl View {
         self.derived = derived(self.cursor, self.span, layout);
     }
 
-    pub fn draw_commands(&self, layout: &Layout) -> Vec<DrawCommand> {
+    pub fn draw_commands(&self) -> Vec<DrawCommand> {
         let mut res = Vec::new();
 
         if let Some(total) = self.derived.rows.last().map(|r| r.limit) {
