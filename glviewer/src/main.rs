@@ -47,9 +47,11 @@ fn main() {
     let mut view = View::new(&layout);
     let render = RenderState::new(&layout, &display);
 
+    let mut click_down_time = None;
     let mut last_name = None;
     let mut modifiers = glutin::event::ModifiersState::empty();
     let mut keys = NavKeys::default();
+    let mut span_stack = Vec::new();
 
     event_loop.run(move |event, _, control_flow| {
         let next_frame_time = Instant::now() + Duration::from_nanos(16_666_667);
@@ -89,7 +91,27 @@ fn main() {
                         glutin::event::VirtualKeyCode::D | glutin::event::VirtualKeyCode::Right => {
                             keys.right = pressed;
                         }
+                        glutin::event::VirtualKeyCode::Escape if pressed => {
+                            if let Some(span) = span_stack.pop() {
+                                view.set_span(&layout, span)
+                            }
+                        }
                         _ => {}
+                    }
+                }
+                glutin::event::WindowEvent::MouseInput { state, button: glutin::event::MouseButton::Left, .. } => {
+                    match state {
+                        glutin::event::ElementState::Pressed => {
+                            click_down_time = Some(Instant::now());
+                            view.begin_drag()
+                        }
+                        glutin::event::ElementState::Released => {
+                            if click_down_time.unwrap().elapsed() > Duration::from_millis(300) {
+                                span_stack.push(view.end_drag());
+                            } else {
+                                view.cancel_drag();
+                            }
+                        },
                     }
                 }
                 _ => {

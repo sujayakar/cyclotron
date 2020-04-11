@@ -1,9 +1,10 @@
 use crate::db::{Span, NameId};
 use crate::layout::{Layout, ThreadId, RowId, BoxListKey, SpanRange};
-use crate::render::{DrawCommand, Color, Region};
+use crate::render::{DrawCommand, Color, Region, SimpleRegion};
 
 pub struct View {
     cursor: (f64, f64),
+    cursor_down: Option<(f64, f64)>,
     derived: Derived,
     limits: Span,
     span: Span,
@@ -28,15 +29,54 @@ fn lerp(a: f64, b: f64, factor: f64) -> f64 {
     a * (1.0 - factor) + b * factor
 }
 
+fn minmaxf(a: f64, b: f64) -> (f64, f64) {
+    if a > b {
+        (b, a)
+    } else {
+        (a, b)
+    }
+}
+
+const MIN_WIDTH: f64 = 1e5;
+
 impl View {
     pub fn new(layout: &Layout) -> View {
         let limits = layout.span_discounting_threads();
         let cursor = (0.0, 0.0);
         View {
             cursor,
+            cursor_down: None,
             derived: derived(cursor, limits, layout),
             limits,
             span: limits,
+        }
+    }
+
+    pub fn begin_drag(&mut self) {
+        self.cursor_down = Some(self.cursor);
+    }
+
+    pub fn cancel_drag(&mut self) {
+        self.cursor_down = None;
+    }
+
+    // Returns the old span
+    pub fn end_drag(&mut self) -> Span {
+        if let Some(cursor_down) = self.cursor_down {
+            let old = self.span;
+
+            let (left, right) = minmaxf(cursor_down.0, self.cursor.0);
+
+            let begin = (self.span.begin as f64) * (1.0 - left) + (self.span.end as f64) * left;
+            let end = (self.span.begin as f64) * (1.0 - right) + (self.span.end as f64) * right;
+
+            self.span.begin = bounded(self.span.begin, begin as u64, self.limits.end - MIN_WIDTH as u64);
+            self.span.end = bounded(self.span.begin + MIN_WIDTH as u64, end as u64, self.limits.end);
+
+            self.cursor_down = None;
+            old
+        } else {
+            panic!("end drag without start?");
         }
     }
 
@@ -47,6 +87,13 @@ impl View {
     pub fn hover(&mut self, layout: &Layout, coord: (f64, f64)) {
         self.cursor = coord;
         self.derived.selection = find_selection(self.cursor, self.span, &self.derived.rows, layout);
+    }
+
+    pub fn set_span(&mut self, layout: &Layout, span: Span) {
+        self.span.begin = bounded(self.limits.begin, span.begin, self.limits.end - MIN_WIDTH as u64);
+        self.span.end = bounded(self.span.begin + MIN_WIDTH as u64, span.end, self.limits.end);
+
+        self.derived = derived(self.cursor, self.span, layout);
     }
 
     pub fn scroll(&mut self, layout: &Layout, offset: f64, scale: f64) {
@@ -61,11 +108,10 @@ impl View {
 
         let mut new_width = (end - begin) * factor;
 
-        let min_width = 1e5;
         let max_width = (self.limits.end - self.limits.begin) as f64;
 
-        if new_width < min_width {
-            new_width = min_width;
+        if new_width < MIN_WIDTH {
+            new_width = MIN_WIDTH;
         }
 
         if new_width > max_width {
@@ -75,8 +121,8 @@ impl View {
         let new_begin = lerp(begin + x_delta, end - new_width + x_delta, cursor);
         let new_end = new_begin + new_width;
 
-        self.span.begin = bounded(self.limits.begin, new_begin as u64, self.limits.end - min_width as u64);
-        self.span.end = bounded(self.span.begin + min_width as u64, new_end as u64, self.limits.end);
+        self.span.begin = bounded(self.limits.begin, new_begin as u64, self.limits.end - MIN_WIDTH as u64);
+        self.span.end = bounded(self.span.begin + MIN_WIDTH as u64, new_end as u64, self.limits.end);
 
         self.derived = derived(self.cursor, self.span, layout);
     }
@@ -123,6 +169,22 @@ impl View {
                     }
                 }
             }
+        }
+
+        if let Some(cursor_down) = self.cursor_down {
+            let (left, right) = minmaxf(cursor_down.0, self.cursor.0);
+            // let (bottom, top) = minmaxf(cursor_down.1, self.cursor.1);
+            res.push(DrawCommand::SimpleBox {
+                color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.4 },
+                region: SimpleRegion {
+                    left: left as f32,
+                    right: right as f32,
+                    // top: top as f32,
+                    // bottom: bottom as f32,
+                    bottom: 0.0,
+                    top: 1.0,
+                },
+            })
         }
 
         res

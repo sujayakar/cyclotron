@@ -8,6 +8,7 @@ use glium::{
     Program,
     Frame,
     Depth,
+    Blend,
     implement_vertex,
     uniform,
     index::{
@@ -311,6 +312,7 @@ impl RenderState {
                 write: true,
                 .. Default::default()
             },
+            blend: Blend::alpha_blending(),
             .. Default::default()
         };
 
