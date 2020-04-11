@@ -22,6 +22,14 @@ struct Args {
     // hide_wakeups: Vec<String>,
 }
 
+#[derive(Default)]
+struct NavKeys {
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+}
+
 fn main() {
     let args = Args::from_args();
 
@@ -40,6 +48,8 @@ fn main() {
     let render = RenderState::new(&layout, &display);
 
     let mut last_name = None;
+    let mut modifiers = glutin::event::ModifiersState::empty();
+    let mut keys = NavKeys::default();
 
     event_loop.run(move |event, _, control_flow| {
         let next_frame_time = Instant::now() + Duration::from_nanos(16_666_667);
@@ -54,6 +64,33 @@ fn main() {
                 glutin::event::WindowEvent::CursorMoved { position, .. } => {
                     let dims = display.get_framebuffer_dimensions();
                     view.hover(&layout, (position.x / dims.0 as f64, position.y / dims.1 as f64));
+                }
+                glutin::event::WindowEvent::ModifiersChanged(new) => {
+                    modifiers = new;
+                }
+                glutin::event::WindowEvent::KeyboardInput { input: glutin::event::KeyboardInput {
+                    state, virtual_keycode: Some(key), ..
+                }, .. } => {
+                    let pressed = match state {
+                        glutin::event::ElementState::Pressed => true,
+                        glutin::event::ElementState::Released => false,
+                    };
+
+                    match key {
+                        glutin::event::VirtualKeyCode::W | glutin::event::VirtualKeyCode::Up => {
+                            keys.up = pressed;
+                        }
+                        glutin::event::VirtualKeyCode::A | glutin::event::VirtualKeyCode::Left => {
+                            keys.left = pressed;
+                        }
+                        glutin::event::VirtualKeyCode::S | glutin::event::VirtualKeyCode::Down => {
+                            keys.down = pressed;
+                        }
+                        glutin::event::VirtualKeyCode::D | glutin::event::VirtualKeyCode::Right => {
+                            keys.right = pressed;
+                        }
+                        _ => {}
+                    }
                 }
                 _ => {
                     // println!("{:?}", event);
@@ -70,13 +107,27 @@ fn main() {
             glutin::event::Event::DeviceEvent { event, .. } => match event {
                 glutin::event::DeviceEvent::MouseWheel { delta: 
                     glutin::event::MouseScrollDelta::PixelDelta(delta) } => {
-                    view.scroll(&layout, delta.x, delta.y);
+                    view.scroll(&layout, -delta.x, delta.y);
                 }
                 _ => {}
             },
             _ => {
                 return;
             }
+        }
+
+        if modifiers == glutin::event::ModifiersState::empty() {
+            let key_x_speed = match (keys.left, keys.right) {
+                (true, false) => -10.0,
+                (false, true) => 10.0,
+                _ => 0.0,
+            };
+            let key_y_speed = match (keys.down, keys.up) {
+                (true, false) => -5.0,
+                (false, true) => 5.0,
+                _ => 0.0,
+            };
+            view.scroll(&layout, key_x_speed, key_y_speed);
         }
 
         if let Some(selected) = view.selected_name() {

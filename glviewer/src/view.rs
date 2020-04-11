@@ -57,7 +57,7 @@ impl View {
         let begin = self.span.begin as f64;
         let end = self.span.end as f64;
 
-        let x_delta = - offset * (end - begin) / 1000.0;
+        let x_delta = offset * (end - begin) / 1000.0;
 
         let mut new_width = (end - begin) * factor;
 
