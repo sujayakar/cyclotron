@@ -106,7 +106,7 @@ fn main() {
                             view.begin_drag()
                         }
                         glutin::event::ElementState::Released => {
-                            if click_down_time.unwrap().elapsed() > Duration::from_millis(300) {
+                            if click_down_time.unwrap().elapsed() > Duration::from_millis(100) {
                                 span_stack.push(view.end_drag());
                             } else {
                                 view.cancel_drag();
