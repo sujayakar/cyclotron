@@ -25,6 +25,14 @@ fn bounded(a: u64, b: u64, c: u64) -> u64 {
     }
 }
 
+fn maxf(a: f64, b: f64) -> f64 {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
 fn lerp(a: f64, b: f64, factor: f64) -> f64 {
     a * (1.0 - factor) + b * factor
 }
@@ -106,7 +114,8 @@ impl View {
 
         let x_delta = offset * (end - begin) / 1000.0;
 
-        let mut new_width = (end - begin) * factor;
+        let orig_new_width = (end - begin) * factor;
+        let mut new_width = orig_new_width;
 
         let max_width = (self.limits.end - self.limits.begin) as f64;
 
@@ -121,7 +130,7 @@ impl View {
         let new_begin = lerp(begin + x_delta, end - new_width + x_delta, cursor);
         let new_end = new_begin + new_width;
 
-        self.span.begin = bounded(self.limits.begin, new_begin as u64, self.limits.end - MIN_WIDTH as u64);
+        self.span.begin = bounded(self.limits.begin, maxf(0.0, new_begin) as u64, self.limits.end - MIN_WIDTH as u64);
         self.span.end = bounded(self.span.begin + MIN_WIDTH as u64, new_end as u64, self.limits.end);
 
         self.derived = derived(self.cursor, self.span, layout);
