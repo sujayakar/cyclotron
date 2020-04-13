@@ -53,6 +53,8 @@ fn main() {
     let mut keys = NavKeys::default();
     let mut span_stack = Vec::new();
 
+    let mut last_tick = Instant::now();
+
     event_loop.run(move |event, _, control_flow| {
         let next_frame_time = Instant::now() + Duration::from_nanos(16_666_667);
         *control_flow = glutin::event_loop::ControlFlow::WaitUntil(next_frame_time);
@@ -139,17 +141,21 @@ fn main() {
         }
 
         if modifiers == glutin::event::ModifiersState::empty() {
+            let now = Instant::now();
+            let elapsed = (now - last_tick).as_secs_f64();
+            last_tick = now;
+            let factor = 400.0;
             let key_x_speed = match (keys.left, keys.right) {
-                (true, false) => -10.0,
-                (false, true) => 10.0,
+                (true, false) => -factor,
+                (false, true) => factor,
                 _ => 0.0,
             };
             let key_y_speed = match (keys.down, keys.up) {
-                (true, false) => -5.0,
-                (false, true) => 5.0,
+                (true, false) => -factor,
+                (false, true) => factor,
                 _ => 0.0,
             };
-            view.scroll(&layout, key_x_speed, key_y_speed);
+            view.scroll(&layout, 2.0 * key_x_speed * elapsed, key_y_speed * elapsed);
         }
 
         if let Some(selected) = view.selected_name() {
