@@ -3,6 +3,7 @@ mod layout;
 mod render;
 mod view;
 
+use std::io::Write;
 use crate::db::{Database};
 use crate::layout::Layout;
 use crate::view::View;
@@ -18,6 +19,8 @@ use std::time::{Duration, Instant};
 #[derive(Debug, StructOpt)]
 struct Args {
     trace: String,
+    #[structopt(long)]
+    show_framerate: bool,
     // grep: Vec<String>,
     // hide_wakeups: Vec<String>,
 }
@@ -55,8 +58,11 @@ fn main() {
 
     let mut last_tick = Instant::now();
 
+    let mut last_frame = Instant::now();
+    let mut frame_rates = Vec::new();
+
     event_loop.run(move |event, _, control_flow| {
-        let next_frame_time = Instant::now() + Duration::from_nanos(16_666_667);
+        let next_frame_time = Instant::now() + Duration::from_nanos(16_666_667/2);
         *control_flow = glutin::event_loop::ControlFlow::WaitUntil(next_frame_time);
 
         match event {
@@ -158,14 +164,29 @@ fn main() {
             view.scroll(&layout, 2.0 * key_x_speed * elapsed, key_y_speed * elapsed);
         }
 
-        if let Some(selected) = view.selected_name() {
+
+        if args.show_framerate {
+            let now = Instant::now();
+            let elapsed = (now - last_frame).as_nanos() as u64;
+
+            frame_rates.push(elapsed);
+
+            if frame_rates.len() == 60 {
+                print!("\r\x1b[0Kaverage {:.3} worst {:.3}",
+                    1e9 * frame_rates.len() as f64 / frame_rates.iter().sum::<u64>() as f64,
+                    1e9 / *frame_rates.iter().max().unwrap() as f64);
+                std::io::stdout().flush().unwrap();
+                frame_rates.clear();
+            }
+
+            last_frame = now;
+
+        } else if let Some(selected) = view.selected_name() {
             if last_name != Some(selected) {
                 println!("{:?}", db.name(selected));
                 last_name = Some(selected);
             }
         }
-
-        // frame_count += 1;
 
         let mut target = display.draw();
         target.clear_color_and_depth((1.0, 1.0, 1.0, 1.0), 1.0);
