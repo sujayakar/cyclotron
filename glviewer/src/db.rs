@@ -25,6 +25,18 @@ pub struct Task {
     pub on_cpu: Option<Vec<Span>>,
 }
 
+#[derive(Copy, Clone)]
+pub struct Wake {
+    pub parked: TaskId,
+    pub nanos: u64,
+}
+
+#[derive(Copy, Clone)]
+pub struct Park {
+    pub waking: TaskId,
+    pub nanos: u64,
+}
+
 struct NameTable {
     by_name: HashMap<String, NameId>,
     names: Vec<String>,
@@ -51,6 +63,8 @@ impl NameTable {
 pub struct Database {
     names: NameTable,
     pub tasks: Vec<Task>,
+    wakes: Vec<Vec<Wake>>,
+    parks: Vec<Vec<Park>>,
 }
 
 impl Database {
@@ -59,12 +73,26 @@ impl Database {
         self.names.names[name.0 as usize].as_str()
     }
 
+    pub fn wakes(&self, task: TaskId) -> &[Wake] {
+        &self.wakes[task.0 as usize]
+    }
+
+    pub fn parks(&self, task: TaskId) -> &[Park] {
+        &self.parks[task.0 as usize]
+    }
+
+    pub fn task(&self, task: TaskId) -> &Task {
+        &self.tasks[task.0 as usize]
+    }
+
+
     pub fn load(path: impl AsRef<Path>) -> Database {
         let mut closed = BitSet::new();
         let mut tasks = Vec::new();
         let mut unterminated = Vec::new();
         let mut task_ids = HashMap::new();
         let mut names = NameTable::new();
+        let mut wakes_wip = Vec::new();
         let mut file = BufReader::new(File::open(path).unwrap());
 
         loop {
@@ -142,14 +170,28 @@ impl Database {
                         closed.insert(tid.0 as usize);
                         tasks[tid.0 as usize].span.end = ts.as_nanos() as u64;
                     }
-                    JsonTraceEvent::Wakeup { waking_span: _, parked_span: _, ts: _ } => {}
+                    JsonTraceEvent::Wakeup { waking_span, parked_span, ts } => {
+                        wakes_wip.push((waking_span, parked_span, ts.as_nanos() as u64));
+                    }
                 }
             }
+        }
+
+        let mut wakes: Vec<Vec<Wake>> = std::iter::repeat(Vec::new()).take(tasks.len()).collect();
+        let mut parks: Vec<Vec<Park>> = std::iter::repeat(Vec::new()).take(tasks.len()).collect();
+
+        for (waking_span, parked_span, nanos) in wakes_wip {
+            let waking_span = task_ids[&waking_span];
+            let parked_span = task_ids[&parked_span];
+            wakes[waking_span.0 as usize].push(Wake { parked: parked_span, nanos });
+            parks[parked_span.0 as usize].push(Park { waking: waking_span, nanos });
         }
 
         Database {
             names,
             tasks,
+            wakes,
+            parks,
         }
     }
 }

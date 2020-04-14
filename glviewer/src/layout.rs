@@ -63,7 +63,7 @@ pub struct Chunk {
     pub begins: Vec<u64>,
     pub ends: Vec<u64>,
     pub names: Vec<NameId>,
-    tasks: Vec<TaskId>,
+    pub tasks: Vec<TaskId>,
 }
 
 impl Chunk {

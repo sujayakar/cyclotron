@@ -1,4 +1,4 @@
-use crate::db::{Span, NameId};
+use crate::db::{Span, NameId, TaskId};
 use crate::layout::{Layout, ThreadId, RowId, BoxListKey, SpanRange};
 use crate::render::{DrawCommand, Color, Region, SimpleRegion};
 
@@ -12,7 +12,7 @@ pub struct View {
 
 struct Derived {
     rows: Vec<Row>,
-    selection: Option<(BoxListKey, NameId, usize)>,
+    selection: Option<InternalSelectionInfo>,
 }
 
 fn bounded(a: u64, b: u64, c: u64) -> u64 {
@@ -46,6 +46,22 @@ fn minmaxf(a: f64, b: f64) -> (f64, f64) {
 }
 
 const MIN_WIDTH: f64 = 1e5;
+
+#[derive(Eq, PartialEq, Copy, Clone)]
+pub struct SelectionInfo {
+    pub task: TaskId,
+    pub name: NameId,
+    pub span: Span,
+}
+
+#[derive(Copy, Clone)]
+struct InternalSelectionInfo {
+    key: BoxListKey,
+    task: TaskId,
+    name: NameId,
+    index: usize,
+    span: Span,
+}
 
 impl View {
     pub fn new(layout: &Layout) -> View {
@@ -88,8 +104,12 @@ impl View {
         }
     }
 
-    pub fn selected_name(&self) -> Option<NameId> {
-        self.derived.selection.map(|(_, name, _)| name)
+    pub fn selected_name(&self) -> Option<SelectionInfo> {
+        self.derived.selection.map(|info| SelectionInfo {
+            name: info.name,
+            span: info.span,
+            task: info.task,
+        } )
     }
 
     pub fn hover(&mut self, layout: &Layout, coord: (f64, f64)) {
@@ -141,8 +161,8 @@ impl View {
 
         if let Some(total) = self.derived.rows.last().map(|r| r.limit) {
 
-            let name_highlight = if let Some((_, name, _)) = self.derived.selection {
-                Some((name, Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 }))
+            let name_highlight = if let Some(selection) = self.derived.selection {
+                Some((selection.name, Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 }))
             } else {
                 None
             };
@@ -165,12 +185,12 @@ impl View {
                         region,
                     });
 
-                    if let Some((key, _, index)) = self.derived.selection {
-                        if key == subrow.key {
+                    if let Some(selection) = self.derived.selection {
+                        if selection.key == subrow.key {
                             res.push(DrawCommand::BoxList {
-                                key,
+                                key: selection.key,
                                 color: Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
-                                range: SpanRange { begin: index, end: index + 1 },
+                                range: SpanRange { begin: selection.index, end: selection.index + 1 },
                                 name_highlight: None,
                                 region,
                             })
@@ -233,7 +253,7 @@ fn rows(span: Span, layout: &Layout) -> Vec<Row> {
     res
 }
 
-fn find_selection(cursor: (f64, f64), span: Span, rows: &[Row], layout: &Layout) -> Option<(BoxListKey, NameId, usize)> {
+fn find_selection(cursor: (f64, f64), span: Span, rows: &[Row], layout: &Layout) -> Option<InternalSelectionInfo> {
     let x_value = (cursor.0 * (span.end - span.begin) as f64) as u64 + span.begin;
 
     if let Some(total) = rows.last().map(|r| r.limit) {
@@ -254,7 +274,13 @@ fn find_selection(cursor: (f64, f64), span: Span, rows: &[Row], layout: &Layout)
                 };
 
                 if let Some(index) = chunk.find(x_value) {
-                    return Some((key, chunk.names[index], index));
+                    return Some(InternalSelectionInfo {
+                        key,
+                        task: chunk.tasks[index],
+                        name: chunk.names[index],
+                        index,
+                        span: Span { begin: chunk.begins[index], end: chunk.ends[index] }
+                    });
                 }
             }
         }

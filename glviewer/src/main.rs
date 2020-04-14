@@ -182,7 +182,21 @@ fn main() {
 
         } else if let Some(selected) = view.selected_name() {
             if last_name != Some(selected) {
-                println!("{:?}", db.name(selected));
+                println!("start {:?} length {:?} : {}",
+                    Duration::from_nanos(selected.span.begin),
+                    Duration::from_nanos(selected.span.end - selected.span.begin),
+                    db.name(selected.name));
+
+                let parks = db.parks(selected.task);
+                for wake in parks {
+                    println!("    woken by: {}", db.name(db.task(wake.waking).name));
+                }
+
+                let wakes = db.wakes(selected.task);
+                for wake in wakes {
+                    println!("    wakes: {}", db.name(db.task(wake.parked).name));
+                }
+
                 last_name = Some(selected);
             }
         }
