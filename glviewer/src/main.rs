@@ -23,6 +23,8 @@ struct Args {
     show_framerate: bool,
     #[structopt(default_value="60")]
     target_framerate: f64,
+    #[structopt(long)]
+    no_wakes_printing: bool,
     // grep: Vec<String>,
     // hide_wakeups: Vec<String>,
 }
@@ -187,14 +189,16 @@ fn main() {
                     Duration::from_nanos(selected.span.end - selected.span.begin),
                     db.name(selected.name));
 
-                let parks = db.parks(selected.task);
-                for wake in parks {
-                    println!("    woken by: {}", db.name(db.task(wake.waking).name));
-                }
+                if !args.no_wakes_printing {
+                    let parks = db.parks(selected.task);
+                    for wake in parks {
+                        println!("    woken by: {}", db.name(db.task(wake.waking).name));
+                    }
 
-                let wakes = db.wakes(selected.task);
-                for wake in wakes {
-                    println!("    wakes: {}", db.name(db.task(wake.parked).name));
+                    let wakes = db.wakes(selected.task);
+                    for wake in wakes {
+                        println!("    wakes: {}", db.name(db.task(wake.parked).name));
+                    }
                 }
 
                 last_name = Some(selected);
