@@ -76,6 +76,11 @@ impl View {
         }
     }
 
+    pub fn relayout(&mut self, layout: &Layout) {
+        self.limits = layout.span_discounting_threads();
+        self.set_span(layout, self.span);
+    }
+
     pub fn begin_drag(&mut self) {
         self.cursor_down = Some(self.cursor);
     }

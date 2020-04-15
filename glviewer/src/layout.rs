@@ -1,5 +1,7 @@
-
+use std::collections::HashMap;
+use bit_set::BitSet;
 use crate::db::{Database, TaskId, Task, Span, NameId};
+use std::collections::HashSet;
 
 pub struct Layout {
     pub threads: Vec<Thread>,
@@ -194,16 +196,16 @@ struct RowAssignment {
 }
 
 pub struct LayoutBuilder {
-    children: Vec<Vec<TaskId>>,
-    task_to_thread: Vec<ThreadId>,
+    children: HashMap<TaskId, Vec<TaskId>>,
+    task_to_thread: HashMap<TaskId, ThreadId>,
     threads: Vec<Thread>,
-    assignments: Vec<RowAssignment>,
+    assignments: HashMap<TaskId, RowAssignment>,
 }
 
 impl LayoutBuilder {
     fn add(&mut self, task: &Task) {
         let thread_id = if let Some(parent) = task.parent {
-            self.task_to_thread[parent.0 as usize]
+            self.task_to_thread[&parent]
         } else {
             let thread_id = ThreadId(self.threads.len());
             self.threads.push(Thread {
@@ -211,13 +213,13 @@ impl LayoutBuilder {
             });
             thread_id
         };
-        assert!(self.task_to_thread.len() == task.id.0 as usize);
-        self.task_to_thread.push(thread_id);
+
+        self.task_to_thread.insert(task.id, thread_id);
 
         let thread = &mut self.threads[thread_id.0];
 
         let row = if let Some(parent) = task.parent {
-            let row_id = self.assignments[parent.0 as usize].children.unwrap();
+            let row_id = self.assignments[&parent].children.unwrap();
             let row = &thread.rows[row_id.0];
             if row.fore.has_overlap(task.span) || row.back.has_overlap(task.span) {
                 thread.find_row(task.span, task.parent.is_none())
@@ -230,7 +232,7 @@ impl LayoutBuilder {
 
         thread.rows[row.0].add(task);
 
-        let children = if self.children[task.id.0 as usize].len() > 0 {
+        let children = if self.children.contains_key(&task.id) {
             let child_row = thread.find_row(task.span, task.parent.is_none());
             thread.rows[child_row.0].reserve.add(task.span, task.name, task.id);
             Some(child_row)
@@ -238,8 +240,7 @@ impl LayoutBuilder {
             None
         };
 
-        assert!(self.assignments.len() == task.id.0 as usize);
-        self.assignments.push(RowAssignment {
+        self.assignments.insert(task.id, RowAssignment {
             // thread: thread_id,
             // row,
             children,
@@ -248,25 +249,62 @@ impl LayoutBuilder {
 }
 
 impl Layout {
-    pub fn new(db: &Database) -> Layout {
+    pub fn new(db: &Database, filter: Option<&str>) -> Layout {
+        let mut filtered_names = BitSet::new();
 
-        let mut children = Vec::new();
+        if let Some(filter) = filter {
+            for (id, name) in db.names().enumerate() {
+                if name.find(filter).is_some() {
+                    filtered_names.insert(id);
+                }
+            }
+        }
+
+        let mut children = HashMap::new();
         for task in &db.tasks {
-            children.push(Vec::new());
             if let Some(parent) = task.parent {
-                children[parent.0 as usize].push(task.id);
+                children.entry(parent).or_insert_with(Vec::new).push(task.id);
             }
         }
 
         let mut b = LayoutBuilder {
             children,
-            task_to_thread: Vec::new(),
+            task_to_thread: HashMap::new(),
             threads: Vec::new(),
-            assignments: Vec::new(),
+            assignments: HashMap::new(),
         };
 
-        for task in &db.tasks {
-            b.add(task)
+        if filter.is_some() {
+            let mut parents = Vec::new();
+            let mut parent_tasks = HashSet::new();
+
+            for task in &db.tasks {
+                if filtered_names.contains(task.name.0 as usize) {
+                    if let Some(parent) = task.parent {
+                        parents.push(parent);
+                        parent_tasks.insert(parent);
+                    }
+                }
+            }
+
+            while let Some(parent) = parents.pop() {
+                let task = &db.tasks[parent.0 as usize];
+
+                if let Some(parent) = task.parent {
+                    parents.push(parent);
+                    parent_tasks.insert(parent);
+                }
+            }
+
+            for task in &db.tasks {
+                if parent_tasks.contains(&task.id) || filtered_names.contains(task.name.0 as usize) {
+                    b.add(task)
+                }
+            }
+        } else {
+            for task in &db.tasks {
+                b.add(task)
+            }
         }
 
         Layout {

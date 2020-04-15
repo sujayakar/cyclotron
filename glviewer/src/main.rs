@@ -41,7 +41,7 @@ fn main() {
     let args = Args::from_args();
 
     let db = Database::load(&args.trace);
-    let layout = Layout::new(&db);
+    let mut layout = Layout::new(&db, None);
     
     let event_loop = glutin::event_loop::EventLoop::new();
     let wb = glutin::window::WindowBuilder::new()
@@ -52,7 +52,7 @@ fn main() {
     let display = glium::Display::new(wb, cb, &event_loop).unwrap();
 
     let mut view = View::new(&layout);
-    let render = RenderState::new(&layout, &display);
+    let mut render = RenderState::new(&layout, &display);
 
     let target_frame_delta = Duration::from_nanos((1e9 / args.target_framerate) as u64);
 
@@ -64,6 +64,12 @@ fn main() {
 
     let mut last_frame = Instant::now();
     let mut frame_rates = Vec::new();
+
+    enum InputMode {
+        Navigate,
+        Search(String),
+    }
+    let mut input_mode = InputMode::Navigate;
 
     event_loop.run(move |event, _, control_flow| {
         let now = Instant::now();
@@ -78,6 +84,28 @@ fn main() {
                     let dims = display.get_framebuffer_dimensions();
                     view.hover(&layout, (position.x / dims.0 as f64, position.y / dims.1 as f64));
                 }
+                glutin::event::WindowEvent::ReceivedCharacter(ch) => {
+                    match &mut input_mode {
+                        InputMode::Navigate => {
+                            if ch == '/' {
+                                input_mode = InputMode::Search(String::new());
+                            }
+                        }
+                        InputMode::Search(ref mut text) => {
+                            if ch == '\r' {
+                                println!("Search {:?}", text);
+
+                                layout = Layout::new(&db, Some(&text));
+                                view.relayout(&layout);
+                                render = RenderState::new(&layout, &display);
+
+                                input_mode = InputMode::Navigate;
+                            } else {
+                                text.push(ch);
+                            }
+                        }
+                    }
+                }
                 glutin::event::WindowEvent::ModifiersChanged(new) => {
                     modifiers = new;
                 }
@@ -89,25 +117,37 @@ fn main() {
                         glutin::event::ElementState::Released => false,
                     };
 
-                    match key {
-                        glutin::event::VirtualKeyCode::W | glutin::event::VirtualKeyCode::Up => {
-                            keys.up = pressed;
-                        }
-                        glutin::event::VirtualKeyCode::A | glutin::event::VirtualKeyCode::Left => {
-                            keys.left = pressed;
-                        }
-                        glutin::event::VirtualKeyCode::S | glutin::event::VirtualKeyCode::Down => {
-                            keys.down = pressed;
-                        }
-                        glutin::event::VirtualKeyCode::D | glutin::event::VirtualKeyCode::Right => {
-                            keys.right = pressed;
-                        }
-                        glutin::event::VirtualKeyCode::Escape if pressed => {
-                            if let Some(span) = span_stack.pop() {
-                                view.set_span(&layout, span)
+                    match &input_mode {
+                        InputMode::Navigate => {
+                            match key {
+                                glutin::event::VirtualKeyCode::W | glutin::event::VirtualKeyCode::Up => {
+                                    keys.up = pressed;
+                                }
+                                glutin::event::VirtualKeyCode::A | glutin::event::VirtualKeyCode::Left => {
+                                    keys.left = pressed;
+                                }
+                                glutin::event::VirtualKeyCode::S | glutin::event::VirtualKeyCode::Down => {
+                                    keys.down = pressed;
+                                }
+                                glutin::event::VirtualKeyCode::D | glutin::event::VirtualKeyCode::Right => {
+                                    keys.right = pressed;
+                                }
+                                glutin::event::VirtualKeyCode::Escape if pressed => {
+                                    if let Some(span) = span_stack.pop() {
+                                        view.set_span(&layout, span)
+                                    }
+                                }
+                                _ => {}
                             }
                         }
-                        _ => {}
+                        InputMode::Search(_) => {
+                            match key {
+                                glutin::event::VirtualKeyCode::Escape if pressed => {
+                                    input_mode = InputMode::Navigate;
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                 }
                 glutin::event::WindowEvent::MouseInput { state, button: glutin::event::MouseButton::Left, .. } => {

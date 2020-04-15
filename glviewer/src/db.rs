@@ -73,6 +73,10 @@ impl Database {
         self.names.names[name.0 as usize].as_str()
     }
 
+    pub fn names(&self) -> impl Iterator<Item=&str> {
+        self.names.names.iter().map(|a| a.as_str())
+    }
+
     pub fn wakes(&self, task: TaskId) -> &[Wake] {
         &self.wakes[task.0 as usize]
     }
