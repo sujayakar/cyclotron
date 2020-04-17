@@ -1,3 +1,4 @@
+use crate::layout::GroupId;
 use crate::view::View;
 use crate::db::{Span, NameId};
 use std::collections::HashMap;
@@ -17,6 +18,7 @@ use glium::{
     },
     vertex::VertexBuffer,
     draw_parameters::DepthTest,
+    texture::Texture1d,
     DrawParameters,
 };
 
@@ -29,7 +31,7 @@ implement_vertex!(SimpleBoxVertex, position);
 #[derive(Copy, Clone)]
 struct BoxListVertex {
     position: [f32; 2],
-    group_ident: u32,
+    group_ident: i32,
 }
 implement_vertex!(BoxListVertex, position, group_ident);
 
@@ -95,12 +97,12 @@ struct BoxListData {
 }
 
 impl BoxListData {
-    fn from_iter(display: &Display, spans: impl Iterator<Item=(NameId, Span)>) -> BoxListData {
+    fn from_iter(display: &Display, spans: impl Iterator<Item=(GroupId, NameId, Span)>) -> BoxListData {
         let mut verts = Vec::new();
         let mut tris = Vec::<u32>::new();
 
-        for (name, span) in spans {
-            let group_ident = name.0;
+        for (_group, name, span) in spans {
+            let group_ident = name.0 as i32;
             let s = verts.len() as u32;
             tris.extend(&[s, s+1, s+2, s+1, s+2, s+3]);
 
@@ -125,25 +127,12 @@ impl BoxListData {
         params: &DrawParameters,
         target: &mut Frame,
         range: SpanRange,
+        color_texture: &Texture1d,
         color: Color,
-        name_highlight: Option<(NameId, Color)>,
+        name: NameId,
+        highlight: Color,
         region: Region,
     ) {
-
-        /*
-        base = 100
-        limit = 105
-
-        1 = limit*scale + offset*scale
-        0 = base*scale + offset*scale
-
-        1 = (limit-base)*scale
-
-        limit-base = scale
-        */
-        let group = name_highlight.map(|n| (n.0).0).unwrap_or(0);
-        let group_color = name_highlight.map(|n| n.1).unwrap_or(color);
-
         target.draw(
             &self.vertex,
             &self.index.slice(6*range.begin .. 6*range.end).unwrap(),
@@ -157,9 +146,10 @@ impl BoxListData {
                     -region.logical_base,
                     region.vertical_base / (region.vertical_limit - region.vertical_base),
                 ],
-                item_color: [color.r, color.g, color.b, color.a],
-                highlight_group: group,
-                group_color: [group_color.r, group_color.g, group_color.b, group_color.a],
+                highlight_group: name.0 as i32,
+                item_color: [color.r, color.g, color.b, color.a ],
+                group_color: [highlight.r, highlight.g, highlight.b, highlight.a],
+                color_texture: color_texture,
             },
             &params).unwrap();
     }
@@ -201,13 +191,14 @@ impl Shaders {
             let vertex = r#"
                 #version 150
                 in vec2 position;
-                in uint group_ident;
+                in int group_ident;
 
                 uniform vec4 group_color;
                 uniform vec4 item_color;
+                uniform sampler1D color_texture;
                 uniform vec2 scale;
                 uniform vec2 offset;
-                uniform uint highlight_group;
+                uniform int highlight_group;
                 
                 out vec4 vert_color;
                 
@@ -219,7 +210,10 @@ impl Shaders {
                     if(highlight_group == group_ident) {
                         vert_color = group_color;
                     } else {
-                        vert_color = item_color;
+                        vert_color = vec4(
+                            item_color.rgb * item_color.a + 
+                            texelFetch(color_texture, group_ident, 0).rgb * (1 - item_color.a),
+                            1.0);
                     }
                 }
             "#;
@@ -279,13 +273,15 @@ pub enum DrawCommand {
         key: BoxListKey,
         range: SpanRange,
         color: Color,
-        name_highlight: Option<(NameId, Color)>,
+        name: Option<NameId>,
+        highlight: Color,
         region: Region,
     },
 }
 
 pub struct RenderState {
     simple_box: SimpleBoxData,
+    color_texture: Texture1d,
     shaders: Shaders,
     box_lists: HashMap<BoxListKey, BoxListData>,
 }
@@ -298,8 +294,24 @@ impl RenderState {
             box_lists.insert(key, BoxListData::from_iter(display, items));
         }
 
+        let mut colors = Vec::new();
+
+        let mut rng = rand::thread_rng();
+        use rand::Rng;
+        for _ in 0..256 {
+            let (r, g, b) = hsl_to_rgb(
+                rng.gen_range(0.0, 1.0),
+                rng.gen_range(0.2, 0.8),
+                rng.gen_range(0.2, 0.5));
+
+            colors.push((r, g, b, 1.0));
+        }
+
+        let color_texture = Texture1d::new(display, colors).unwrap();
+
         RenderState {
             simple_box: SimpleBoxData::new(display),
+            color_texture,
             shaders: Shaders::new(display),
             box_lists,
         }
@@ -321,11 +333,59 @@ impl RenderState {
                 DrawCommand::SimpleBox { color, region } => {
                     self.simple_box.draw(&self.shaders, &params, target, color, region);
                 }
-                DrawCommand::BoxList { key, range, color, name_highlight, region } => {
+                DrawCommand::BoxList { key, range, color, name, highlight, region } => {
                     let data = &self.box_lists[&key];
-                    data.draw(&self.shaders, &params, target, range, color, name_highlight, region);
+                    data.draw(
+                        &self.shaders,
+                        &params,
+                        target,
+                        range,
+                        &self.color_texture,
+                        color,
+                        name.unwrap_or(NameId(0xefffffff)),
+                        highlight,
+                        region);
                 }
             }
         }
+    }
+}
+
+fn hue_to_p(p: f32, q: f32, mut t: f32) -> f32 {
+    if t <0.00 {
+        t += 1.0;
+    }
+    if t > 1.0 {
+        t -= 1.0;
+    }
+    if t < 1.0/6.0 {
+        return p + (q - p) * 6.0 * t;
+    }
+    if t < 1.0/2.0 {
+        return q;
+    }
+    if t < 2.0/3.0 {
+        return p + (q - p) * (2.0/3.0 - t) * 6.0;
+    }
+    p
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
+    if s == 0.0 {
+        (l, l, l)
+    } else {
+        let q = if l < 0.5 {
+            l * (1.0 + s)
+        } else {
+            l + s - l * s
+        };
+
+        let p = 2.0 * l - q;
+
+        (
+            hue_to_p(p, q, h + 1.0/3.0),
+            hue_to_p(p, q, h),
+            hue_to_p(p, q, h - 1.0/3.0),
+        )
     }
 }

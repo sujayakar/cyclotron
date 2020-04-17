@@ -1,3 +1,4 @@
+use crate::util::VecDefaultMap;
 use std::collections::HashMap;
 use bit_set::BitSet;
 use crate::db::{Database, TaskId, Task, Span, NameId};
@@ -65,6 +66,7 @@ pub struct Chunk {
     pub begins: Vec<u64>,
     pub ends: Vec<u64>,
     pub names: Vec<NameId>,
+    pub groups: Vec<GroupId>,
     pub tasks: Vec<TaskId>,
 }
 
@@ -74,6 +76,7 @@ impl Chunk {
             begins: Vec::new(),
             ends: Vec::new(),
             names: Vec::new(),
+            groups: Vec::new(),
             tasks: Vec::new(),
         }
     }
@@ -130,6 +133,7 @@ impl Chunk {
             begins: &self.begins,
             ends: &self.ends,
             names: &self.names,
+            groups: &self.groups,
         }
     }
 }
@@ -141,6 +145,7 @@ fn test_has_overlap() {
         ends:   vec![2, 5, 15],
         names: vec![NameId(1), NameId(1), NameId(1)],
         tasks: vec![TaskId(1), TaskId(2), TaskId(3)],
+        groups: vec![],
     };
     assert!(chunk.has_overlap(Span { begin: 0, end: 20 }));
     assert!(!chunk.has_overlap(Span { begin: 2, end: 3 }));
@@ -160,25 +165,31 @@ pub struct ChunkSpanIter<'a> {
     begins: &'a [u64],
     ends: &'a [u64],
     names: &'a [NameId],
+    groups: &'a [GroupId],
 }
 
 impl<'a> Iterator for ChunkSpanIter<'a> {
-    type Item = (NameId, Span);
-    fn next(&mut self) -> Option<(NameId, Span)> {
+    type Item = (GroupId, NameId, Span);
+    fn next(&mut self) -> Option<(GroupId, NameId, Span)> {
         if self.begins.len() > 0 {
             let res = (
+                self.groups[0],
                 self.names[0],
                 Span { begin: self.begins[0], end: self.ends[0] },
             );
             self.begins = &self.begins[1..];
             self.ends = &self.ends[1..];
             self.names = &self.names[1..];
+            self.groups = &self.groups[1..];
             Some(res)
         } else {
             None
         }
     }
 }
+
+#[derive(Default, Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct GroupId(pub u32);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct ThreadId(pub usize);
@@ -196,6 +207,7 @@ struct RowAssignment {
 }
 
 pub struct LayoutBuilder {
+    tasks_by_name: VecDefaultMap<NameId, usize>,
     children: HashMap<TaskId, Vec<TaskId>>,
     task_to_thread: HashMap<TaskId, ThreadId>,
     threads: Vec<Thread>,
@@ -213,6 +225,8 @@ impl LayoutBuilder {
             });
             thread_id
         };
+
+        *self.tasks_by_name.entry(task.name) += 1;
 
         self.task_to_thread.insert(task.id, thread_id);
 
@@ -246,6 +260,35 @@ impl LayoutBuilder {
             children,
         });
     }
+
+    fn compute_task_name_table(&self) -> VecDefaultMap<NameId, GroupId> {
+        let mut res = VecDefaultMap::new();
+
+        let mut group_colors = 1;
+
+        for (name, count) in &self.tasks_by_name {
+            if *count > 0 {
+                group_colors += 1;
+                *res.entry(name) = GroupId(group_colors);
+            }
+        }
+
+        res
+    }
+
+    fn fill_group_names(&mut self) {
+        let table = self.compute_task_name_table();
+
+        for thread in &mut self.threads {
+            for row in &mut thread.rows {
+                for chunk in &mut [&mut row.back, &mut row.fore] {
+                    for name in &chunk.names {
+                        chunk.groups.push(*table.get(*name));
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Layout {
@@ -268,6 +311,7 @@ impl Layout {
         }
 
         let mut b = LayoutBuilder {
+            tasks_by_name: VecDefaultMap::new(),
             children,
             task_to_thread: HashMap::new(),
             threads: Vec::new(),
@@ -306,6 +350,8 @@ impl Layout {
                 b.add(task)
             }
         }
+
+        b.fill_group_names();
 
         Layout {
             threads: b.threads,

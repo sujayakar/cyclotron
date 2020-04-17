@@ -1,3 +1,4 @@
+use crate::util::Ident;
 use std::collections::HashMap;
 use std::io::{BufReader, BufRead};
 use std::fs::File;
@@ -13,6 +14,15 @@ pub struct Span {
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct NameId(pub u32);
+
+impl Ident for NameId {
+    fn to_usize(self) -> usize {
+        self.0 as usize
+    }
+    fn from_usize(v: usize) -> Self {
+        Self(v as u32)
+    }
+}
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct TaskId(pub u32);

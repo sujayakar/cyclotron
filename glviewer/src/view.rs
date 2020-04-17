@@ -166,10 +166,10 @@ impl View {
 
         if let Some(total) = self.derived.rows.last().map(|r| r.limit) {
 
-            let name_highlight = if let Some(selection) = self.derived.selection {
-                Some((selection.name, Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 }))
+            let (name, highlight) = if let Some(selection) = self.derived.selection {
+                (Some(selection.name), Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 })
             } else {
-                None
+                (None, Color { r: 0.0, g: 0.0, b: 1.0, a: 0.0 })
             };
 
             for row in &self.derived.rows {
@@ -186,7 +186,8 @@ impl View {
                         key: subrow.key,
                         color: subrow.color,
                         range: subrow.range,
-                        name_highlight,
+                        name,
+                        highlight,
                         region,
                     });
 
@@ -196,7 +197,8 @@ impl View {
                                 key: selection.key,
                                 color: Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
                                 range: SpanRange { begin: selection.index, end: selection.index + 1 },
-                                name_highlight: None,
+                                name: None,
+                                highlight: Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
                                 region,
                             })
                         }
@@ -233,11 +235,11 @@ fn rows(span: Span, layout: &Layout) -> Vec<Row> {
         for (rid, r) in t.rows.iter().enumerate() {
             let mut subrows = Vec::new();
 
-            for (ch, val, green) in &[(&r.back, true, 0.5), (&r.fore, false, 1.0)] {
+            for (ch, val, alpha) in &[(&r.back, true, 0.5), (&r.fore, false, 0.0)] {
                 if ch.has_overlap(span) {
                     subrows.push(Subrow {
                         key: BoxListKey(ThreadId(tid), RowId(rid), *val),
-                        color: Color { r: 0.0, g: *green, b: 0.0, a: 1.0 },
+                        color: Color { r: 0.0, g: 0.0, b: 0.0, a: *alpha },
                         // TODO: sub-select a range
                         range: SpanRange { begin: 0, end: ch.begins.len() },
                     });

@@ -2,6 +2,7 @@ mod db;
 mod layout;
 mod render;
 mod view;
+mod util;
 
 use std::io::Write;
 use crate::db::{Database};
