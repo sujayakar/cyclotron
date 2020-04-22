@@ -165,6 +165,10 @@ impl View {
         ((self.span.begin as f64) * (1.0 - self.cursor.0) + (self.span.end as f64) * self.cursor.0) as u64
     }
 
+    pub fn span_time(&self) -> u64 {
+        self.span.end - self.span.begin
+    }
+
     pub fn set_span(&mut self, layout: &Layout, span: Span) {
         self.span.begin = bounded(self.limits.begin, span.begin, self.limits.end - MIN_WIDTH as u64);
         self.span.end = bounded(self.span.begin + MIN_WIDTH as u64, span.end, self.limits.end);
@@ -177,6 +181,10 @@ impl View {
     }
 
     pub fn scroll(&mut self, layout: &Layout, offset: f64, scale: f64) {
+        if self.mode == Mode::Profile {
+            return;
+        }
+
         let factor = 1.05f64.powf(-scale / 1e1);
 
         let cursor = self.cursor.0;
@@ -435,7 +443,7 @@ fn find_profile_selection(cursor: (f64, f64), span: Span, threads: &[ProfileThre
                 let limit = row.limit as f64 / total_height as f64;
                 if cursor.1 >= base && cursor.1 <= limit {
                     let thread_base = thread.rows[0].base;
-                    let thread_limit = thread.rows.last().unwrap().base;
+                    let thread_limit = thread.rows.last().unwrap().limit;
                     return Some(InternalProfileSelectionInfo {
                         name: row.name,
                         time: row.time,

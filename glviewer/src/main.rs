@@ -268,8 +268,9 @@ fn main() {
                         }
                     }
                     SelectionInfo::ProfileName { name, time } => {
-                        println!("time {:?} : {}",
+                        println!("time {:?} ({:.2}%) : {}",
                             Duration::from_nanos(time),
+                            time as f32 / view.span_time() as f32 * 100.0,
                             db.name(name));
                     }
                 }
