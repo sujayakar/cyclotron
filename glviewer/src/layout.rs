@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use bit_set::BitSet;
 use crate::db::{Database, TaskId, Task, Span, NameId};
 use std::collections::HashSet;
+use std::time::Duration;
 
 pub struct Layout {
     pub threads: Vec<Thread>,
@@ -393,5 +394,32 @@ impl Layout {
                 res.into_iter()
             })
         })
+    }
+
+    pub fn span_count(&self) -> usize {
+        let mut sum = 0;
+
+        for t in &self.threads {
+            for row in &t.rows {
+                sum += row.fore.begins.len();
+                sum += row.back.begins.len();
+            }
+        }
+        sum
+    }
+
+    pub fn print_all_spans(&self, db: &Database) {
+        for t in &self.threads {
+            for row in &t.rows {
+                for chunk in &[&row.fore, &row.back] {
+                    for (name, (begin, end)) in chunk.names.iter().zip(chunk.begins.iter().zip(&chunk.ends)) {
+                        println!("  start {:?} length {:?} : {}",
+                            Duration::from_nanos(*begin),
+                            Duration::from_nanos(end - begin),
+                            db.name(*name));
+                    }
+                }
+            }
+        }
     }
 }

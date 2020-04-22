@@ -1,8 +1,7 @@
 use crate::util::Ident;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, BufRead};
 use std::fs::File;
-use bit_set::BitSet;
 use cyclotron_backend::TraceEvent as JsonTraceEvent;
 use std::path::Path;
 
@@ -101,13 +100,15 @@ impl Database {
 
 
     pub fn load(path: impl AsRef<Path>) -> Database {
-        let mut closed = BitSet::new();
+        let mut unclosed = HashSet::new();
         let mut tasks = Vec::new();
-        let mut unterminated = Vec::new();
+        let mut unterminated = HashMap::new();
         let mut task_ids = HashMap::new();
         let mut names = NameTable::new();
         let mut wakes_wip = Vec::new();
         let mut file = BufReader::new(File::open(path).unwrap());
+
+        let mut max_ts = 0;
 
         loop {
             let mut buf = String::new();
@@ -122,6 +123,8 @@ impl Database {
                         let tid = TaskId(task_ids.len() as u32);
                         assert!(task_ids.insert(id, tid).is_none());
                         let parent = task_ids[&parent_id];
+                        max_ts = std::cmp::max(ts.as_nanos() as u64, max_ts);
+                        assert!(unclosed.insert(tid));
                         tasks.push(Task {
                             id: tid,
                             parent: Some(parent),
@@ -129,28 +132,31 @@ impl Database {
                             span: Span { begin: ts.as_nanos() as u64, end: std::u64::MAX },
                             on_cpu: Some(Vec::new()),
                         });
-                        unterminated.push(None);
                     }
                     JsonTraceEvent::AsyncOnCPU { id, ts } => {
                         let tid = task_ids[&id];
-                        assert!(std::mem::replace(&mut unterminated[tid.0 as usize], Some(ts.as_nanos() as u64)).is_none());
+                        max_ts = std::cmp::max(ts.as_nanos() as u64, max_ts);
+                        assert!(unterminated.insert(tid, ts.as_nanos() as u64).is_none());
                     }
                     JsonTraceEvent::AsyncOffCPU { id, ts,  } => {
                         let tid = task_ids[&id];
-                        let begin = unterminated[tid.0 as usize].take().unwrap();
+                        let begin = unterminated.remove(&tid).unwrap();
                         let end = ts.as_nanos() as u64;
+                        max_ts = std::cmp::max(ts.as_nanos() as u64, max_ts);
                         tasks[tid.0 as usize].on_cpu.as_mut().unwrap().push(Span { begin, end });
                     }
                     JsonTraceEvent::AsyncEnd { id, ts, outcome: _ } => {
                         let tid = task_ids[&id];
-                        assert!(!closed.contains(tid.0 as usize));
-                        closed.insert(tid.0 as usize);
+                        assert!(unclosed.remove(&tid));
+                        max_ts = std::cmp::max(ts.as_nanos() as u64, max_ts);
                         tasks[tid.0 as usize].span.end = ts.as_nanos() as u64;
                     }
                     JsonTraceEvent::SyncStart { id, ts, name, parent_id, metadata: _ } => {
                         let tid = TaskId(task_ids.len() as u32);
                         assert!(task_ids.insert(id, tid).is_none());
                         let parent = task_ids[&parent_id];
+                        max_ts = std::cmp::max(ts.as_nanos() as u64, max_ts);
+                        assert!(unclosed.insert(tid));
                         tasks.push(Task {
                             id: tid,
                             parent: Some(parent),
@@ -158,17 +164,18 @@ impl Database {
                             span: Span { begin: ts.as_nanos() as u64, end: std::u64::MAX },
                             on_cpu: None,
                         });
-                        unterminated.push(None);
                     }
                     JsonTraceEvent::SyncEnd { id, ts } => {
                         let tid = task_ids[&id];
-                        assert!(!closed.contains(tid.0 as usize));
-                        closed.insert(tid.0 as usize);
+                        assert!(unclosed.remove(&tid));
+                        max_ts = std::cmp::max(ts.as_nanos() as u64, max_ts);
                         tasks[tid.0 as usize].span.end = ts.as_nanos() as u64;
                     }
                     JsonTraceEvent::ThreadStart { id, ts, name } => {
                         let tid = TaskId(task_ids.len() as u32);
                         assert!(task_ids.insert(id, tid).is_none());
+                        max_ts = std::cmp::max(ts.as_nanos() as u64, max_ts);
+                        assert!(unclosed.insert(tid));
                         tasks.push(Task {
                             id: tid,
                             parent: None,
@@ -176,19 +183,28 @@ impl Database {
                             span: Span { begin: ts.as_nanos() as u64, end: std::u64::MAX },
                             on_cpu: None,
                         });
-                        unterminated.push(None);
                     }
                     JsonTraceEvent::ThreadEnd { id, ts } => {
                         let tid = task_ids[&id];
-                        assert!(!closed.contains(tid.0 as usize));
-                        closed.insert(tid.0 as usize);
+                        assert!(unclosed.remove(&tid));
+                        max_ts = std::cmp::max(ts.as_nanos() as u64, max_ts);
                         tasks[tid.0 as usize].span.end = ts.as_nanos() as u64;
                     }
                     JsonTraceEvent::Wakeup { waking_span, parked_span, ts } => {
+                        max_ts = std::cmp::max(ts.as_nanos() as u64, max_ts);
                         wakes_wip.push((waking_span, parked_span, ts.as_nanos() as u64));
                     }
                 }
             }
+        }
+
+        for (tid, begin) in unterminated {
+            let end = max_ts;
+            tasks[tid.0 as usize].on_cpu.as_mut().unwrap().push(Span { begin, end });
+        }
+
+        for tid in unclosed {
+            tasks[tid.0 as usize].span.end = max_ts;
         }
 
         let mut wakes: Vec<Vec<Wake>> = std::iter::repeat(Vec::new()).take(tasks.len()).collect();

@@ -9,7 +9,6 @@ pub struct VecDefaultMap<Id: Ident, V: Default> {
     _phantom: std::marker::PhantomData<Id>,
 }
 
-
 impl<Id: Ident, V: Default> VecDefaultMap<Id, V> {
     pub fn new() -> Self {
         VecDefaultMap {

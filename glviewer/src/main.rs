@@ -84,6 +84,7 @@ fn main() {
                 glutin::event::WindowEvent::CursorMoved { position, .. } => {
                     let dims = display.get_framebuffer_dimensions();
                     view.hover(&layout, (position.x / dims.0 as f64, position.y / dims.1 as f64));
+                    // println!("cursor time: {:?}", Duration::from_nanos(view.cursor_time()));
                 }
                 glutin::event::WindowEvent::ReceivedCharacter(ch) => {
                     match &mut input_mode {
@@ -95,9 +96,17 @@ fn main() {
                         InputMode::Search(ref mut text) => {
                             if ch == '\r' {
                                 println!("Search {:?}", text);
-
                                 layout = Layout::new(&db, Some(&text));
+                                let span_count = layout.span_count();
+                                println!("  found {} spans", span_count);
+                                if span_count < 100 {
+                                    layout.print_all_spans(&db);
+                                }
+                                println!("  (type <slash><return> to get return to normal view)");
                                 view.relayout(&layout);
+                                if text == "" {
+                                    view.set_span_full(&layout);
+                                }
                                 render = RenderState::new(&layout, &display);
 
                                 input_mode = InputMode::Navigate;
@@ -136,6 +145,8 @@ fn main() {
                                 glutin::event::VirtualKeyCode::Escape if pressed => {
                                     if let Some(span) = span_stack.pop() {
                                         view.set_span(&layout, span)
+                                    } else {
+                                        view.set_span_full(&layout);
                                     }
                                 }
                                 _ => {}

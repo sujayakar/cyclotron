@@ -122,11 +122,19 @@ impl View {
         self.derived.selection = find_selection(self.cursor, self.span, &self.derived.rows, layout);
     }
 
+    pub fn cursor_time(&self) -> u64 {
+        ((self.span.begin as f64) * (1.0 - self.cursor.0) + (self.span.end as f64) * self.cursor.0) as u64
+    }
+
     pub fn set_span(&mut self, layout: &Layout, span: Span) {
         self.span.begin = bounded(self.limits.begin, span.begin, self.limits.end - MIN_WIDTH as u64);
         self.span.end = bounded(self.span.begin + MIN_WIDTH as u64, span.end, self.limits.end);
 
         self.derived = derived(self.cursor, self.span, layout);
+    }
+
+    pub fn set_span_full(&mut self, layout: &Layout) {
+        self.set_span(layout, self.limits);
     }
 
     pub fn scroll(&mut self, layout: &Layout, offset: f64, scale: f64) {
