@@ -96,18 +96,20 @@ fn main() {
                         InputMode::Search(ref mut text) => {
                             if ch == '\r' {
                                 println!("Search {:?}", text);
-                                layout = Layout::new(&db, Some(&text));
-                                let span_count = layout.span_count();
+                                let new_layout = Layout::new(&db, Some(&text));
+                                let span_count = new_layout.span_count();
                                 println!("  found {} spans", span_count);
-                                if span_count < 100 {
-                                    layout.print_all_spans(&db);
+                                if span_count > 0 {
+                                    layout = new_layout;
+                                    println!("  (type <slash><return> to get return to normal view)");
+
+                                    view.relayout(&layout);
+
+                                    if text == "" {
+                                        view.set_span_full(&layout);
+                                    }
+                                    render = RenderState::new(&layout, &display);
                                 }
-                                println!("  (type <slash><return> to get return to normal view)");
-                                view.relayout(&layout);
-                                if text == "" {
-                                    view.set_span_full(&layout);
-                                }
-                                render = RenderState::new(&layout, &display);
 
                                 input_mode = InputMode::Navigate;
                             } else {
