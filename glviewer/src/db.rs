@@ -109,6 +109,18 @@ impl Database {
 
         let mut max_ts = 0;
 
+        fn simplify_name(mut name: String) -> String {
+            let paren = name.find('(');
+            let curly = name.find('{');
+            let limit = match (paren, curly) {
+                (Some(a), Some(b)) => std::cmp::min(a, b),
+                (_, Some(v)) | (Some(v), _) => v,
+                _ => name.len(),
+            };
+            name.truncate(limit);
+            name
+        }
+
         loop {
             let mut buf = String::new();
             let num_read = file.read_line(&mut buf).unwrap();
@@ -127,7 +139,7 @@ impl Database {
                         tasks.push(Task {
                             id: tid,
                             parent: Some(parent),
-                            name: names.insert(name),
+                            name: names.insert(simplify_name(name)),
                             span: Span { begin: ts.as_nanos() as u64, end: std::u64::MAX },
                             on_cpu: Some(Vec::new()),
                         });
@@ -159,7 +171,7 @@ impl Database {
                         tasks.push(Task {
                             id: tid,
                             parent: Some(parent),
-                            name: names.insert(name),
+                            name: names.insert(simplify_name(name)),
                             span: Span { begin: ts.as_nanos() as u64, end: std::u64::MAX },
                             on_cpu: None,
                         });
@@ -178,7 +190,7 @@ impl Database {
                         tasks.push(Task {
                             id: tid,
                             parent: None,
-                            name: names.insert(name),
+                            name: names.insert(simplify_name(name)),
                             span: Span { begin: ts.as_nanos() as u64, end: std::u64::MAX },
                             on_cpu: None,
                         });

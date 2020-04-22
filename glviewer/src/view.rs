@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::db::{Span, NameId, TaskId};
 use crate::layout::{Layout, ThreadId, RowId, BoxListKey, SpanRange};
 use crate::render::{DrawCommand, Color, Region, SimpleRegion};
@@ -50,10 +51,16 @@ pub enum Mode {
 }
 
 #[derive(Eq, PartialEq, Copy, Clone)]
-pub struct SelectionInfo {
-    pub task: TaskId,
-    pub name: NameId,
-    pub span: Span,
+pub enum SelectionInfo {
+    Span {
+        task: TaskId,
+        name: NameId,
+        span: Span,
+    },
+    ProfileName {
+        name: NameId,
+        time: u64,
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -63,6 +70,15 @@ struct InternalSelectionInfo {
     name: NameId,
     index: usize,
     span: Span,
+}
+
+struct InternalProfileSelectionInfo {
+    name: NameId,
+    time: u64,
+    thread_base: f32,
+    thread_limit: f32,
+    base: f32,
+    limit: f32,
 }
 
 impl View {
@@ -121,18 +137,22 @@ impl View {
         }
     }
 
-    pub fn selected_name(&self) -> Option<SelectionInfo> {
-        match self.derived.mode {
-            DerivedMode::Trace { selection, .. } => {
-                selection.map(|info| SelectionInfo {
-                    name: info.name,
-                    span: info.span,
-                    task: info.task,
-                } )
+    pub fn selection(&self) -> Option<SelectionInfo> {
+        match &self.derived.mode {
+            DerivedMode::Trace { selection: Some(selection), .. } => {
+                Some(SelectionInfo::Span {
+                    name: selection.name,
+                    span: selection.span,
+                    task: selection.task,
+                })
             }
-            DerivedMode::Profile { .. } => {
-                None
+            DerivedMode::Profile { selection: Some(selection), .. } => {
+                Some(SelectionInfo::ProfileName {
+                    name: selection.name,
+                    time: selection.time
+                })
             }
+            _ => None
         }
     }
 
@@ -184,7 +204,6 @@ impl View {
 
         self.span.begin = bounded(self.limits.begin, maxf(0.0, new_begin) as u64, self.limits.end - MIN_WIDTH as u64);
         self.span.end = bounded(self.span.begin + MIN_WIDTH as u64, new_end as u64, self.limits.end);
-
         self.derived = derived(self.cursor, self.span, self.mode, layout);
     }
 
@@ -251,8 +270,46 @@ impl View {
                     })
                 }
             }
-            DerivedMode::Profile { .. } => {
+            DerivedMode::Profile { threads, selection } => {
+                let total_time = (self.span.end - self.span.begin) as f32;
 
+                if let Some(total_height) = threads.last().and_then(|t| t.rows.last().map(|r| r.limit)) {
+
+                    if let Some(selection) = selection {
+                        res.push(DrawCommand::SimpleBox {
+                            color: Color { r: 0.0, g: 1.0, b: 1.0, a: 0.4 },
+                            region: SimpleRegion {
+                                left: 0.0,
+                                right: 1.0,
+                                bottom: selection.thread_base / total_height,
+                                top: selection.thread_limit / total_height,
+                            },
+                        });
+                        res.push(DrawCommand::SimpleBox {
+                            color: Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 },
+                            region: SimpleRegion {
+                                left: 0.0,
+                                right: 1.0,
+                                bottom: selection.base / total_height,
+                                top: selection.limit / total_height,
+                            },
+                        });
+                    }
+
+                    for thread in threads {
+                        for row in &thread.rows {
+                            res.push(DrawCommand::SimpleBox {
+                                color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.4 },
+                                region: SimpleRegion {
+                                    left: 0.0,
+                                    right: row.time as f32 / total_time,
+                                    bottom: row.base / total_height,
+                                    top: row.limit / total_height,
+                                },
+                            })
+                        }
+                    }
+                }
             }
         }
 
@@ -293,6 +350,48 @@ fn rows(span: Span, layout: &Layout) -> Vec<Row> {
     res
 }
 
+fn profile_rows(span: Span, layout: &Layout) -> Vec<ProfileThread> {
+    let mut res = Vec::new();
+    let mut base = 0.0;
+
+    for (_tid, t) in layout.threads.iter().enumerate() {
+        let mut cpu_time_per_name = HashMap::new();
+
+        for (_rid, r) in t.rows.iter().enumerate() {
+            for (name, (begin, end)) in r.fore.names.iter().zip(r.fore.begins.iter().zip(&r.fore.ends)) {
+                let begin = std::cmp::max(*begin, span.begin);
+                let end = std::cmp::max(begin, std::cmp::min(*end, span.end));
+
+                if end - begin > 0 {
+                    *cpu_time_per_name.entry(name).or_insert(0) += end - begin;
+                }
+            }
+        }
+
+        let mut cpu_time_per_name: Vec<_> = cpu_time_per_name.into_iter().collect();
+        cpu_time_per_name.sort_by(|a, b| (b.1).cmp(&a.1));
+
+        let mut rows = Vec::new();
+
+        for (name, time) in cpu_time_per_name {
+            rows.push(ProfileRow {
+                time,
+                name: *name,
+                color: Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+                base,
+                limit: base + 1.0,
+            });
+            base += 1.0;
+        }
+
+        res.push(ProfileThread {
+            rows,
+        })
+    }
+
+    res
+}
+
 fn find_selection(cursor: (f64, f64), span: Span, rows: &[Row], layout: &Layout) -> Option<InternalSelectionInfo> {
     let x_value = (cursor.0 * (span.end - span.begin) as f64) as u64 + span.begin;
 
@@ -328,6 +427,30 @@ fn find_selection(cursor: (f64, f64), span: Span, rows: &[Row], layout: &Layout)
     None
 }
 
+fn find_profile_selection(cursor: (f64, f64), span: Span, threads: &[ProfileThread], layout: &Layout) -> Option<InternalProfileSelectionInfo> {
+    if let Some(total_height) = threads.last().and_then(|t| t.rows.last().map(|r| r.limit)) {
+        for thread in threads {
+            for row in &thread.rows {
+                let base = row.base as f64 / total_height as f64;
+                let limit = row.limit as f64 / total_height as f64;
+                if cursor.1 >= base && cursor.1 <= limit {
+                    let thread_base = thread.rows[0].base;
+                    let thread_limit = thread.rows.last().unwrap().base;
+                    return Some(InternalProfileSelectionInfo {
+                        name: row.name,
+                        time: row.time,
+                        thread_base,
+                        thread_limit,
+                        base: row.base,
+                        limit: row.limit,
+                    })
+                }
+            }
+        }
+    }
+    None
+}
+
 fn derived(cursor: (f64, f64), span: Span, mode: Mode, layout: &Layout) -> Derived {
     match mode {
         Mode::Trace => {
@@ -343,8 +466,14 @@ fn derived(cursor: (f64, f64), span: Span, mode: Mode, layout: &Layout) -> Deriv
             }
         }
         Mode::Profile => {
+            let threads = profile_rows(span, layout);
+
+            let selection = find_profile_selection(cursor, span, &threads, layout);
+
             Derived {
                 mode: DerivedMode::Profile {
+                    threads,
+                    selection,
                 },
             }
         }
@@ -357,8 +486,8 @@ impl Derived {
             DerivedMode::Trace { ref rows, ref mut selection } => {
                 *selection = find_selection(cursor, span, rows, layout);
             }
-            DerivedMode::Profile { .. } => {
-
+            DerivedMode::Profile { ref threads, ref mut selection } => {
+                *selection = find_profile_selection(cursor, span, threads, layout)
             }
         }
     }
@@ -374,7 +503,8 @@ enum DerivedMode {
         selection: Option<InternalSelectionInfo>,
     },
     Profile {
-
+        threads: Vec<ProfileThread>,
+        selection: Option<InternalProfileSelectionInfo>,
     },
 }
 
@@ -386,6 +516,18 @@ struct Subrow {
 
 struct Row {
     subrows: Vec<Subrow>,
+    base: f32,
+    limit: f32,
+}
+
+struct ProfileThread {
+    rows: Vec<ProfileRow>,
+}
+
+struct ProfileRow {
+    time: u64,
+    color: Color,
+    name: NameId,
     base: f32,
     limit: f32,
 }

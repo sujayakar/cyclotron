@@ -7,7 +7,7 @@ mod util;
 use std::io::Write;
 use crate::db::{Database};
 use crate::layout::Layout;
-use crate::view::View;
+use crate::view::{View, SelectionInfo};
 use crate::render::RenderState;
 
 use glium::{
@@ -230,9 +230,10 @@ fn main() {
                 (false, true) => factor,
                 _ => 0.0,
             };
-            view.scroll(&layout, 2.0 * key_x_speed * elapsed, key_y_speed * elapsed);
+            if key_x_speed != 0.0 || key_y_speed != 0.0 {
+                view.scroll(&layout, 2.0 * key_x_speed * elapsed, key_y_speed * elapsed);
+            }
         }
-
 
         if args.show_framerate {
             frame_rates.push(elapsed.as_nanos() as u64);
@@ -245,22 +246,31 @@ fn main() {
                 frame_rates.clear();
             }
 
-        } else if let Some(selected) = view.selected_name() {
+        } else if let Some(selected) = view.selection() {
             if last_name != Some(selected) {
-                println!("start {:?} length {:?} : {}",
-                    Duration::from_nanos(selected.span.begin),
-                    Duration::from_nanos(selected.span.end - selected.span.begin),
-                    db.name(selected.name));
+                match selected {
+                    SelectionInfo::Span { name, span, task } => {
+                        println!("start {:?} length {:?} : {}",
+                            Duration::from_nanos(span.begin),
+                            Duration::from_nanos(span.end - span.begin),
+                            db.name(name));
 
-                if !args.no_wakes_printing {
-                    let parks = db.parks(selected.task);
-                    for wake in parks {
-                        println!("    woken by: {}", db.name(db.task(wake.waking).name));
+                        if !args.no_wakes_printing {
+                            let parks = db.parks(task);
+                            for wake in parks {
+                                println!("    woken by: {}", db.name(db.task(wake.waking).name));
+                            }
+
+                            let wakes = db.wakes(task);
+                            for wake in wakes {
+                                println!("    wakes: {}", db.name(db.task(wake.parked).name));
+                            }
+                        }
                     }
-
-                    let wakes = db.wakes(selected.task);
-                    for wake in wakes {
-                        println!("    wakes: {}", db.name(db.task(wake.parked).name));
+                    SelectionInfo::ProfileName { name, time } => {
+                        println!("time {:?} : {}",
+                            Duration::from_nanos(time),
+                            db.name(name));
                     }
                 }
 
