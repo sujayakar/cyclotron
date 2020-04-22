@@ -5,14 +5,10 @@ use crate::render::{DrawCommand, Color, Region, SimpleRegion};
 pub struct View {
     cursor: (f64, f64),
     cursor_down: Option<(f64, f64)>,
+    mode: Mode,
     derived: Derived,
     limits: Span,
     span: Span,
-}
-
-struct Derived {
-    rows: Vec<Row>,
-    selection: Option<InternalSelectionInfo>,
 }
 
 fn bounded(a: u64, b: u64, c: u64) -> u64 {
@@ -47,6 +43,12 @@ fn minmaxf(a: f64, b: f64) -> (f64, f64) {
 
 const MIN_WIDTH: f64 = 1e5;
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum Mode {
+    Trace,
+    Profile,
+}
+
 #[derive(Eq, PartialEq, Copy, Clone)]
 pub struct SelectionInfo {
     pub task: TaskId,
@@ -67,13 +69,23 @@ impl View {
     pub fn new(layout: &Layout) -> View {
         let limits = layout.span_discounting_threads();
         let cursor = (0.0, 0.0);
+        let mode = Mode::Trace;
         View {
             cursor,
+            mode,
             cursor_down: None,
-            derived: derived(cursor, limits, layout),
+            derived: derived(cursor, limits, mode, layout),
             limits,
             span: limits,
         }
+    }
+
+    pub fn toggle_mode(&mut self, layout: &Layout) {
+        self.mode = match self.mode {
+            Mode::Trace => Mode::Profile,
+            Mode::Profile => Mode::Trace,
+        };
+        self.derived = derived(self.cursor, self.span, self.mode, layout);
     }
 
     pub fn relayout(&mut self, layout: &Layout) {
@@ -110,16 +122,23 @@ impl View {
     }
 
     pub fn selected_name(&self) -> Option<SelectionInfo> {
-        self.derived.selection.map(|info| SelectionInfo {
-            name: info.name,
-            span: info.span,
-            task: info.task,
-        } )
+        match self.derived.mode {
+            DerivedMode::Trace { selection, .. } => {
+                selection.map(|info| SelectionInfo {
+                    name: info.name,
+                    span: info.span,
+                    task: info.task,
+                } )
+            }
+            DerivedMode::Profile { .. } => {
+                None
+            }
+        }
     }
 
     pub fn hover(&mut self, layout: &Layout, coord: (f64, f64)) {
         self.cursor = coord;
-        self.derived.selection = find_selection(self.cursor, self.span, &self.derived.rows, layout);
+        self.derived.hover(self.cursor, self.span, layout);
     }
 
     pub fn cursor_time(&self) -> u64 {
@@ -130,7 +149,7 @@ impl View {
         self.span.begin = bounded(self.limits.begin, span.begin, self.limits.end - MIN_WIDTH as u64);
         self.span.end = bounded(self.span.begin + MIN_WIDTH as u64, span.end, self.limits.end);
 
-        self.derived = derived(self.cursor, self.span, layout);
+        self.derived = derived(self.cursor, self.span, self.mode, layout);
     }
 
     pub fn set_span_full(&mut self, layout: &Layout) {
@@ -166,69 +185,75 @@ impl View {
         self.span.begin = bounded(self.limits.begin, maxf(0.0, new_begin) as u64, self.limits.end - MIN_WIDTH as u64);
         self.span.end = bounded(self.span.begin + MIN_WIDTH as u64, new_end as u64, self.limits.end);
 
-        self.derived = derived(self.cursor, self.span, layout);
+        self.derived = derived(self.cursor, self.span, self.mode, layout);
     }
 
     pub fn draw_commands(&self) -> Vec<DrawCommand> {
         let mut res = Vec::new();
 
-        if let Some(total) = self.derived.rows.last().map(|r| r.limit) {
+        match &self.derived.mode {
+            DerivedMode::Trace { rows, selection } => {
+                if let Some(total) = rows.last().map(|r| r.limit) {
+                    let (name, highlight) = if let Some(selection) = selection {
+                        (Some(selection.name), Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 })
+                    } else {
+                        (None, Color { r: 0.0, g: 0.0, b: 1.0, a: 0.0 })
+                    };
 
-            let (name, highlight) = if let Some(selection) = self.derived.selection {
-                (Some(selection.name), Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 })
-            } else {
-                (None, Color { r: 0.0, g: 0.0, b: 1.0, a: 0.0 })
-            };
+                    for row in rows {
+                        let region = Region {
+                            logical_base: (self.span.begin as f32) / 1e9,
+                            logical_limit: (self.span.end as f32) / 1e9,
 
-            for row in &self.derived.rows {
-                let region = Region {
-                    logical_base: (self.span.begin as f32) / 1e9,
-                    logical_limit: (self.span.end as f32) / 1e9,
+                            vertical_base: row.base / total,
+                            vertical_limit: row.limit / total,
+                        };
 
-                    vertical_base: row.base / total,
-                    vertical_limit: row.limit / total,
-                };
-
-                for subrow in &row.subrows {
-                    res.push(DrawCommand::BoxList {
-                        key: subrow.key,
-                        color: subrow.color,
-                        range: subrow.range,
-                        name,
-                        highlight,
-                        region,
-                    });
-
-                    if let Some(selection) = self.derived.selection {
-                        if selection.key == subrow.key {
+                        for subrow in &row.subrows {
                             res.push(DrawCommand::BoxList {
-                                key: selection.key,
-                                color: Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
-                                range: SpanRange { begin: selection.index, end: selection.index + 1 },
-                                name: None,
-                                highlight: Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+                                key: subrow.key,
+                                color: subrow.color,
+                                range: subrow.range,
+                                name,
+                                highlight,
                                 region,
-                            })
+                            });
+
+                            if let Some(selection) = selection {
+                                if selection.key == subrow.key {
+                                    res.push(DrawCommand::BoxList {
+                                        key: selection.key,
+                                        color: Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+                                        range: SpanRange { begin: selection.index, end: selection.index + 1 },
+                                        name: None,
+                                        highlight: Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+                                        region,
+                                    })
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
 
-        if let Some(cursor_down) = self.cursor_down {
-            let (left, right) = minmaxf(cursor_down.0, self.cursor.0);
-            // let (bottom, top) = minmaxf(cursor_down.1, self.cursor.1);
-            res.push(DrawCommand::SimpleBox {
-                color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.4 },
-                region: SimpleRegion {
-                    left: left as f32,
-                    right: right as f32,
-                    // top: top as f32,
-                    // bottom: bottom as f32,
-                    bottom: 0.0,
-                    top: 1.0,
-                },
-            })
+                if let Some(cursor_down) = self.cursor_down {
+                    let (left, right) = minmaxf(cursor_down.0, self.cursor.0);
+                    // let (bottom, top) = minmaxf(cursor_down.1, self.cursor.1);
+                    res.push(DrawCommand::SimpleBox {
+                        color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.4 },
+                        region: SimpleRegion {
+                            left: left as f32,
+                            right: right as f32,
+                            // top: top as f32,
+                            // bottom: bottom as f32,
+                            bottom: 0.0,
+                            top: 1.0,
+                        },
+                    })
+                }
+            }
+            DerivedMode::Profile { .. } => {
+
+            }
         }
 
         res
@@ -303,15 +328,54 @@ fn find_selection(cursor: (f64, f64), span: Span, rows: &[Row], layout: &Layout)
     None
 }
 
-fn derived(cursor: (f64, f64), span: Span, layout: &Layout) -> Derived {
-    let rows = rows(span, layout);
+fn derived(cursor: (f64, f64), span: Span, mode: Mode, layout: &Layout) -> Derived {
+    match mode {
+        Mode::Trace => {
+            let rows = rows(span, layout);
 
-    let selection = find_selection(cursor, span, &rows, layout);
+            let selection = find_selection(cursor, span, &rows, layout);
 
-    Derived {
-        rows,
-        selection,
+            Derived {
+                mode: DerivedMode::Trace {
+                    rows,
+                    selection,
+                },
+            }
+        }
+        Mode::Profile => {
+            Derived {
+                mode: DerivedMode::Profile {
+                },
+            }
+        }
     }
+}
+
+impl Derived {
+    fn hover(&mut self, cursor: (f64, f64), span: Span, layout: &Layout) {
+        match self.mode {
+            DerivedMode::Trace { ref rows, ref mut selection } => {
+                *selection = find_selection(cursor, span, rows, layout);
+            }
+            DerivedMode::Profile { .. } => {
+
+            }
+        }
+    }
+}
+
+struct Derived {
+    mode: DerivedMode,
+}
+
+enum DerivedMode {
+    Trace {
+        rows: Vec<Row>,
+        selection: Option<InternalSelectionInfo>,
+    },
+    Profile {
+
+    },
 }
 
 struct Subrow {

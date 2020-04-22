@@ -142,6 +142,15 @@ fn main() {
                                 glutin::event::VirtualKeyCode::D | glutin::event::VirtualKeyCode::Right => {
                                     keys.right = pressed;
                                 }
+                                glutin::event::VirtualKeyCode::Q => {
+                                    *control_flow = glutin::event_loop::ControlFlow::Exit;
+                                    return;
+                                }
+                                glutin::event::VirtualKeyCode::P => {
+                                    if pressed {
+                                        view.toggle_mode(&layout);
+                                    }
+                                }
                                 glutin::event::VirtualKeyCode::Escape if pressed => {
                                     if let Some(span) = span_stack.pop() {
                                         view.set_span(&layout, span)

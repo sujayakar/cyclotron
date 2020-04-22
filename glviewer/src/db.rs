@@ -98,7 +98,6 @@ impl Database {
         &self.tasks[task.0 as usize]
     }
 
-
     pub fn load(path: impl AsRef<Path>) -> Database {
         let mut unclosed = HashSet::new();
         let mut tasks = Vec::new();
