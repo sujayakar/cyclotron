@@ -2,9 +2,11 @@ mod db;
 mod layout;
 mod render;
 mod view;
+mod text;
 mod util;
 
 use std::io::Write;
+
 use crate::db::{Database};
 use crate::layout::Layout;
 use crate::view::{View, SelectionInfo};
@@ -43,7 +45,7 @@ fn main() {
 
     let db = Database::load(&args.trace);
     let mut layout = Layout::new(&db, None);
-    
+
     let event_loop = glutin::event_loop::EventLoop::new();
     let wb = glutin::window::WindowBuilder::new()
         .with_title(format!("Cyclotron: {}", args.trace));
@@ -52,6 +54,7 @@ fn main() {
         .with_multisampling(8);
     let display = glium::Display::new(wb, cb, &event_loop).unwrap();
 
+    let fonts = crate::text::FontCache::new(&display);
     let mut view = View::new(&layout);
     let mut render = RenderState::new(&layout, &display);
 
@@ -198,10 +201,10 @@ fn main() {
                 glutin::event::StartCause::Init => (),
                 _ => return,
             },
-            glutin::event::Event::MainEventsCleared | 
+            glutin::event::Event::MainEventsCleared |
             glutin::event::Event::RedrawEventsCleared => return,
             glutin::event::Event::DeviceEvent { event, .. } => match event {
-                glutin::event::DeviceEvent::MouseWheel { delta: 
+                glutin::event::DeviceEvent::MouseWheel { delta:
                     glutin::event::MouseScrollDelta::PixelDelta(delta) } => {
                     view.scroll(&layout, -delta.x, delta.y);
                 }
@@ -211,7 +214,7 @@ fn main() {
                 return;
             }
         }
-        
+
         let next_frame_time = now + target_frame_delta;
         let elapsed = now - last_frame;
         last_frame = now;
@@ -283,6 +286,7 @@ fn main() {
         target.clear_color_and_depth((1.0, 1.0, 1.0, 1.0), 1.0);
 
         render.draw(&view, &mut target);
+        fonts.draw(&mut target);
 
         target.finish().unwrap();
     });
