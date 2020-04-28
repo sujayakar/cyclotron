@@ -7,10 +7,11 @@ mod util;
 
 use std::io::Write;
 
-use crate::db::{Database};
+use crate::db::Database;
 use crate::layout::Layout;
 use crate::view::{View, SelectionInfo};
 use crate::render::RenderState;
+use crate::text::TextCache;
 
 use glium::{
     glutin,
@@ -54,9 +55,9 @@ fn main() {
         .with_multisampling(8);
     let display = glium::Display::new(wb, cb, &event_loop).unwrap();
 
-    let fonts = crate::text::FontCache::new(&display);
+    let text_cache = TextCache::new(&display, db.name_ids_by_name());
     let mut view = View::new(&layout);
-    let mut render = RenderState::new(&layout, &display);
+    let mut render = RenderState::new(&layout, &display, text_cache);
 
     let target_frame_delta = Duration::from_nanos((1e9 / args.target_framerate) as u64);
 
@@ -111,7 +112,7 @@ fn main() {
                                     if text == "" {
                                         view.set_span_full(&layout);
                                     }
-                                    render = RenderState::new(&layout, &display);
+                                    render.rebuild(&layout, &display);
                                 }
 
                                 input_mode = InputMode::Navigate;
@@ -286,7 +287,6 @@ fn main() {
         target.clear_color_and_depth((1.0, 1.0, 1.0, 1.0), 1.0);
 
         render.draw(&view, &mut target);
-        fonts.draw(&mut target);
 
         target.finish().unwrap();
     });

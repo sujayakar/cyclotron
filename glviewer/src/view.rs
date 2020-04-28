@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::db::{Span, NameId, TaskId};
-use crate::layout::{Layout, ThreadId, RowId, BoxListKey, SpanRange};
+use crate::layout::{Layout, ThreadId, RowId, BoxListKey, SpanRange, LabelListKey};
 use crate::render::{DrawCommand, Color, Region, SimpleRegion};
 
 pub struct View {
@@ -259,6 +259,11 @@ impl View {
                                 }
                             }
                         }
+
+                        res.push(DrawCommand::LabelList {
+                            key: LabelListKey(row.thread_id, row.row_id),
+                            region,
+                        })
                     }
                 }
 
@@ -346,6 +351,8 @@ fn rows(span: Span, layout: &Layout) -> Vec<Row> {
 
             if subrows.len() > 0 {
                 res.push(Row {
+                    thread_id: ThreadId(tid),
+                    row_id: RowId(rid),
                     subrows,
                     base,
                     limit: base + 1.0,
@@ -523,6 +530,8 @@ struct Subrow {
 }
 
 struct Row {
+    thread_id: ThreadId,
+    row_id: RowId,
     subrows: Vec<Subrow>,
     base: f32,
     limit: f32,

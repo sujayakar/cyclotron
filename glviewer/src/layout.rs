@@ -33,7 +33,8 @@ impl Thread {
             is_thread,
             fore: Chunk::new(),
             back: Chunk::new(),
-            reserve: Chunk::new()
+            reserve: Chunk::new(),
+            labels: LabelChunk::default(),
         });
         RowId(id)
     }
@@ -44,6 +45,7 @@ pub struct Row {
     pub fore: Chunk,
     pub back: Chunk,
     reserve: Chunk,
+    pub labels: LabelChunk,
 }
 
 impl Row {
@@ -51,7 +53,7 @@ impl Row {
         if let Some(on_cpu) = task.on_cpu.as_ref() {
             self.back.add(task.span, task.name, task.id);
             assert!(!self.fore.has_overlap(task.span));
-            
+
             for span in on_cpu {
                 self.fore.add(*span, task.name, task.id);
             }
@@ -59,6 +61,43 @@ impl Row {
             self.fore.add(task.span, task.name, task.id);
             assert!(!self.back.has_overlap(task.span));
         }
+        self.labels.add(task);
+    }
+}
+
+#[derive(Default)]
+pub struct LabelChunk {
+    begins: Vec<u64>,
+    ends: Vec<u64>,
+    names: Vec<NameId>,
+}
+
+impl LabelChunk {
+    fn add(&mut self, task: &Task) {
+        let index = match self.ends.binary_search(&task.span.begin) {
+            Ok(index) => index + 1,
+            Err(index) => index,
+        };
+        if index == self.ends.len() {
+            self.begins.push(task.span.begin);
+            self.ends.push(task.span.end);
+            self.names.push(task.name);
+        } else {
+            assert!(self.begins[index] >= task.span.end);
+            self.begins.insert(index, task.span.begin);
+            self.ends.insert(index, task.span.end);
+            self.names.insert(index, task.name);
+        }
+    }
+
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (NameId, Span)> + 'a {
+        let spans = self.begins.iter().zip(self.ends.iter())
+            .map(|(&begin, &end)| Span { begin, end });
+        self.names.iter().cloned().zip(spans)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.begins.is_empty()
     }
 }
 
@@ -200,6 +239,9 @@ pub struct RowId(pub usize);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct BoxListKey(pub ThreadId, pub RowId, pub bool);
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct LabelListKey(pub ThreadId, pub RowId);
 
 struct RowAssignment {
     // thread: ThreadId,
@@ -392,6 +434,18 @@ impl Layout {
                     res.push((BoxListKey(ThreadId(tid), RowId(rid), true), r.back.spans()));
                 }
                 res.into_iter()
+            })
+        })
+    }
+
+    pub fn iter_labels<'a>(&'a self) -> impl Iterator<Item=(LabelListKey, impl Iterator<Item=(NameId, Span)> + 'a)> + 'a {
+        self.threads.iter().enumerate().flat_map(|(tid, t)| {
+            t.rows.iter().enumerate().flat_map(move |(rid, r)| {
+                if !r.labels.is_empty() {
+                    Some((LabelListKey(ThreadId(tid), RowId(rid)), r.labels.iter()))
+                } else {
+                    None
+                }
             })
         })
     }

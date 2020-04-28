@@ -2,7 +2,8 @@ use crate::layout::GroupId;
 use crate::view::View;
 use crate::db::{Span, NameId};
 use std::collections::HashMap;
-use crate::layout::{Layout, BoxListKey, SpanRange};
+use crate::layout::{Layout, BoxListKey, LabelListKey, SpanRange};
+use crate::text::{TextCache, LabelListData};
 use glium::{
     Surface,
     Display,
@@ -199,9 +200,9 @@ impl Shaders {
                 uniform vec2 scale;
                 uniform vec2 offset;
                 uniform int highlight_group;
-                
+
                 out vec4 vert_color;
-                
+
                 void main() {
                     vec2 pos0 = (position + offset)*scale;
                     vec2 pos0_offset = pos0 - 0.5;
@@ -211,7 +212,7 @@ impl Shaders {
                         vert_color = group_color;
                     } else {
                         vert_color = vec4(
-                            item_color.rgb * item_color.a + 
+                            item_color.rgb * item_color.a +
                             texelFetch(color_texture, group_ident, 0).rgb * (1 - item_color.a),
                             1.0);
                     }
@@ -277,6 +278,10 @@ pub enum DrawCommand {
         highlight: Color,
         region: Region,
     },
+    LabelList {
+        key: LabelListKey,
+        region: Region,
+    },
 }
 
 pub struct RenderState {
@@ -284,14 +289,21 @@ pub struct RenderState {
     color_texture: Texture1d,
     shaders: Shaders,
     box_lists: HashMap<BoxListKey, BoxListData>,
+    label_lists: HashMap<LabelListKey, LabelListData>,
+    pub text_cache: TextCache,
 }
 
 impl RenderState {
-    pub fn new(layout: &Layout, display: &Display) -> RenderState {
+    pub fn new(layout: &Layout, display: &Display, text_cache: TextCache) -> RenderState {
         let mut box_lists = HashMap::new();
 
         for (key, items) in layout.iter_box_lists() {
             box_lists.insert(key, BoxListData::from_iter(display, items));
+        }
+
+        let mut label_lists = HashMap::new();
+        for (key, labels) in layout.iter_labels() {
+            label_lists.insert(key, text_cache.data(display, labels));
         }
 
         let mut colors = Vec::new();
@@ -314,7 +326,21 @@ impl RenderState {
             color_texture,
             shaders: Shaders::new(display),
             box_lists,
+            label_lists,
+            text_cache,
         }
+    }
+
+    pub fn rebuild(&mut self, layout: &Layout, display: &Display) {
+        self.box_lists.clear();
+        for (key, items) in layout.iter_box_lists() {
+            self.box_lists.insert(key, BoxListData::from_iter(display, items));
+        }
+        self.label_lists.clear();
+        for (key, labels) in layout.iter_labels() {
+            self.label_lists.insert(key, self.text_cache.data(display, labels));
+        }
+        self.simple_box = SimpleBoxData::new(display);
     }
 
     pub fn draw(&self, view: &View, target: &mut Frame) {
@@ -332,7 +358,7 @@ impl RenderState {
             match cmd {
                 DrawCommand::SimpleBox { color, region } => {
                     self.simple_box.draw(&self.shaders, &params, target, color, region);
-                }
+                },
                 DrawCommand::BoxList { key, range, color, name, highlight, region } => {
                     let data = &self.box_lists[&key];
                     data.draw(
@@ -345,7 +371,15 @@ impl RenderState {
                         name.unwrap_or(NameId(0xefffffff)),
                         highlight,
                         region);
-                }
+                },
+                DrawCommand::LabelList { key, region } => {
+                    self.label_lists[&key].draw(
+                        &self.text_cache,
+                        &params,
+                        target,
+                        region,
+                    );
+                },
             }
         }
     }

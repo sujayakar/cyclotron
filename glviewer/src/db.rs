@@ -86,6 +86,10 @@ impl Database {
         self.names.names.iter().map(|a| a.as_str())
     }
 
+    pub fn name_ids_by_name(&self) -> &HashMap<String, NameId> {
+        &self.names.by_name
+    }
+
     pub fn wakes(&self, task: TaskId) -> &[Wake] {
         &self.wakes[task.0 as usize]
     }
