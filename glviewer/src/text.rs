@@ -1,5 +1,18 @@
 use std::borrow::Cow;
-use glium::{Display, Frame, Rect, Program, VertexBuffer, implement_vertex, uniform, Surface};
+use glium::{
+    Blend,
+    Display,
+    DrawParameters,
+    Frame,
+    Program,
+    Rect,
+    Surface,
+    VertexBuffer,
+    implement_vertex,
+    uniform,
+};
+use glium::index::{IndexBuffer, PrimitiveType};
+use glium::uniforms::MagnifySamplerFilter;
 use glium::texture::{
     ClientFormat,
     MipmapsOption,
@@ -18,9 +31,9 @@ struct TextVertex {
 implement_vertex!(TextVertex, position, tex_coords);
 
 pub struct FontCache {
-    cache: Cache<'static>,
     cache_texture: Texture2d,
     vertex_buffer: VertexBuffer<TextVertex>,
+    index_buffer: IndexBuffer<u32>,
     program: Program,
 }
 
@@ -113,71 +126,73 @@ impl FontCache {
             let (w, h) = display.get_framebuffer_dimensions();
             (w as f32, h as f32)
         };
-        let vertex_buffer = {
-            let origin = rusttype::point(0.0, 0.0);
-            let vertices: Vec<TextVertex> = glyphs
-                .iter()
-                .filter_map(|g| cache.rect_for(0, g).ok().flatten())
-                .flat_map(|(uv_rect, screen_rect)| {
-                    let min_v = rusttype::vector(
-                        screen_rect.min.x as f32 / screen_width - 0.5,
-                        1.0 - screen_rect.min.y as f32 / screen_height - 0.5,
-                    );
-                    let max_v = rusttype::vector(
-                        screen_rect.max.x as f32 / screen_width - 0.5,
-                        1.0 - screen_rect.max.y as f32 / screen_height - 0.5,
-                    );
-                    let gl_rect = rusttype::Rect {
-                        min: origin + min_v * 2.0,
-                        max: origin + max_v * 2.0,
-                    };
-                    vec![
-                        TextVertex {
-                            position: [gl_rect.min.x, gl_rect.max.y],
-                            tex_coords: [uv_rect.min.x, uv_rect.max.y],
-                        },
-                        TextVertex {
-                            position: [gl_rect.min.x, gl_rect.min.y],
-                            tex_coords: [uv_rect.min.x, uv_rect.min.y],
-                        },
-                        TextVertex {
-                            position: [gl_rect.max.x, gl_rect.min.y],
-                            tex_coords: [uv_rect.max.x, uv_rect.min.y],
-                        },
-                        TextVertex {
-                            position: [gl_rect.max.x, gl_rect.min.y],
-                            tex_coords: [uv_rect.max.x, uv_rect.min.y],
-                        },
-                        TextVertex {
-                            position: [gl_rect.max.x, gl_rect.max.y],
-                            tex_coords: [uv_rect.max.x, uv_rect.max.y],
-                        },
-                        TextVertex {
-                            position: [gl_rect.min.x, gl_rect.max.y],
-                            tex_coords: [uv_rect.min.x, uv_rect.max.y],
-                        },
-                    ]
-                })
-                .collect();
-            VertexBuffer::new(display, &vertices).unwrap()
-        };
+        let origin = rusttype::point(0.0, 0.0);
 
-        FontCache { vertex_buffer, cache, cache_texture, program }
+        let mut vertices = vec![];
+        let mut triangles = vec![];
+
+        for glyph in &glyphs {
+            let (uv_rect, screen_rect) = match cache.rect_for(0, glyph) {
+                Ok(Some(r)) => r,
+                Ok(None) | Err(..) => continue,
+            };
+            let min_v = rusttype::vector(
+                screen_rect.min.x as f32 / screen_width - 0.5,
+                1.0 - screen_rect.min.y as f32 / screen_height - 0.5,
+            );
+            let max_v = rusttype::vector(
+                screen_rect.max.x as f32 / screen_width - 0.5,
+                1.0 - screen_rect.max.y as f32 / screen_height - 0.5,
+            );
+            let gl_rect = rusttype::Rect {
+                min: origin + min_v * 2.0,
+                max: origin + max_v * 2.0,
+            };
+
+            let s = vertices.len() as u32;
+            vertices.extend(&[
+                TextVertex {
+                    position: [gl_rect.min.x, gl_rect.min.y],
+                    tex_coords: [uv_rect.min.x, uv_rect.min.y],
+                },
+                TextVertex {
+                    position: [gl_rect.max.x, gl_rect.min.y],
+                    tex_coords: [uv_rect.max.x, uv_rect.min.y],
+                },
+                TextVertex {
+                    position: [gl_rect.min.x, gl_rect.max.y],
+                    tex_coords: [uv_rect.min.x, uv_rect.max.y],
+                },
+                TextVertex {
+                    position: [gl_rect.max.x, gl_rect.max.y],
+                    tex_coords: [uv_rect.max.x, uv_rect.max.y],
+                },
+            ]);
+            triangles.extend(&[s, s+1, s+2, s+1, s+2, s+3]);
+        }
+        let vertex_buffer = VertexBuffer::new(display, &vertices).unwrap();
+        let index_buffer = IndexBuffer::new(
+            display,
+            PrimitiveType::TrianglesList,
+            &triangles,
+        ).unwrap();
+
+        FontCache { vertex_buffer, index_buffer, cache_texture, program }
     }
 
     pub fn draw(&self, target: &mut Frame) {
         let uniforms = uniform! {
-            tex:self.cache_texture
+            tex: self.cache_texture
                 .sampled()
-                .magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest)
+                .magnify_filter(MagnifySamplerFilter::Nearest)
         };
         target.draw(
             &self.vertex_buffer,
-            glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList),
+            &self.index_buffer,
             &self.program,
             &uniforms,
-            &glium::DrawParameters {
-                blend: glium::Blend::alpha_blending(),
+            &DrawParameters {
+                blend: Blend::alpha_blending(),
                 ..Default::default()
             },
         ).unwrap();
