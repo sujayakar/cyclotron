@@ -169,28 +169,48 @@ impl TextCache {
                 let s = vertices.len() as u32;
                 let task_begin = (span.begin as f32) / 1e9;
                 let task_end = (span.end as f32) / 1e9;
+
+                let tex_base = [uv_rect.min.x, uv_rect.min.y];
+                let tex_dimensions = [uv_rect.max.x - uv_rect.min.x, uv_rect.max.y - uv_rect.min.y];
+
                 vertices.extend(&[
                     TextVertex {
                         glyph: [min.x, min.y],
-                        tex_coords: [uv_rect.min.x, uv_rect.min.y],
+
+                        tex_pos: [0., 0.],
+                        tex_base,
+                        tex_dimensions,
+
                         task_begin,
                         task_end,
                     },
                     TextVertex {
                         glyph: [max.x, min.y],
-                        tex_coords: [uv_rect.max.x, uv_rect.min.y],
+
+                        tex_pos: [1., 0.],
+                        tex_base,
+                        tex_dimensions,
+
                         task_begin,
                         task_end,
                     },
                     TextVertex {
                         glyph: [min.x, max.y],
-                        tex_coords: [uv_rect.min.x, uv_rect.max.y],
+
+                        tex_pos: [0., 1.],
+                        tex_base,
+                        tex_dimensions,
+
                         task_begin,
                         task_end,
                     },
                     TextVertex {
                         glyph: [max.x, max.y],
-                        tex_coords: [uv_rect.max.x, uv_rect.max.y],
+
+                        tex_pos: [1., 1.],
+                        tex_base,
+                        tex_dimensions,
+
                         task_begin,
                         task_end,
                     },
@@ -217,12 +237,16 @@ impl TextCache {
             in vec2 glyph;
             in float task_begin;
             in float task_end;
-            in vec2 tex_coords;
+            in vec2 tex_pos;
+            in vec2 tex_base;
+            in vec2 tex_dimensions;
 
             uniform vec2 scale;
             uniform vec2 offset;
 
-            out vec2 v_tex_coords;
+            out vec2 v_tex_pos;
+            out vec2 v_tex_base;
+            out vec2 v_tex_dimensions;
 
             void main() {
                 // Compute the left and right coordinates of the task.
@@ -239,18 +263,60 @@ impl TextCache {
 
                 vec2 glyph1_offset = glyph1 - 0.5;
                 gl_Position = vec4(2 * glyph1_offset.x, -2 * glyph1_offset.y, 0.0, 1.0);
-                v_tex_coords = tex_coords;
+
+                v_tex_pos = tex_pos;
+                v_tex_base = tex_base;
+                v_tex_dimensions = tex_dimensions;
             }
         "#;
         let fragment = r#"
             #version 140
 
             uniform sampler2D tex;
-            in vec2 v_tex_coords;
+            in vec2 v_tex_pos;
+            in vec2 v_tex_base;
+            in vec2 v_tex_dimensions;
+
             out vec4 f_color;
 
+            // Shrink the glyph by 5% so we have room for our border.
+            float scaled_sample(vec2 pos) {
+                vec2 scaled = (pos - 0.025) / 0.95;
+                float mask = 1.0;
+
+                if (scaled.x < 0.0 || scaled.x > 1.0 || scaled.y < 0.0 || scaled.y > 1.0)
+                    mask = 0.0;
+
+                return texture(tex, v_tex_base + scaled * v_tex_dimensions).r * mask;
+            }
+
             void main() {
-                f_color = vec4(1.0, 1.0, 1.0, texture(tex, v_tex_coords).r);
+                float center = scaled_sample(v_tex_pos);
+
+                // Convolve with
+                //
+                //   1 1 1
+                //   1 0 1
+                //   1 1 1
+                //
+                // to compute a border weight that we then clamp at 1.0.
+                //
+                // TODO: This doesn't look great when the text is small. Ideally we should mipmap
+                // the font texture and precompute the outline within the texture.
+                float width = 0.02;
+                float neighbors = -center;
+                for (int i = -1; i <= 1; i++) {
+                    for (int j = -1; j <= 1; j++) {
+                        neighbors += scaled_sample(v_tex_pos + vec2(i * width, j * width));
+                    }
+                }
+                neighbors = min(neighbors, 1.0);
+
+                // Clamp the border's contribution when this pixel is actually on at its center
+                // point so we don't try to render a border on the interior of the glyph.
+                float border = min(1.0 - center, neighbors);
+
+                f_color = vec4(vec3(1.0, 1.0, 1.0) * center + vec3(0.1, 0.1, 0.1) * border, max(center, border));
             }
         "#;
         Program::from_source(display, vertex, fragment, None).unwrap()
@@ -262,9 +328,12 @@ struct TextVertex {
     glyph: [f32; 2],
     task_begin: f32,
     task_end: f32,
-    tex_coords: [f32; 2],
+
+    tex_pos: [f32; 2],
+    tex_base: [f32; 2],
+    tex_dimensions: [f32; 2],
 }
-implement_vertex!(TextVertex, glyph, task_begin, task_end, tex_coords);
+implement_vertex!(TextVertex, glyph, task_begin, task_end, tex_pos, tex_base, tex_dimensions);
 
 pub struct LabelListData {
     vertex_buffer: VertexBuffer<TextVertex>,
