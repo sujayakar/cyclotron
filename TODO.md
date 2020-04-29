@@ -1,0 +1,6 @@
+[ ] There's a layout bug where spans don't nest correctly within their parent. PreLocal within "examples/local_move.log" exhibits this.
+[ ] Add a scale for time at the top
+[ ] Arrows (or something similar) to visualize wakeups without having to know what to hover on
+[ ] Collapsing spans and their children
+[ ] Status line at the bottom to replace terminal state
+[ ] UI for search
