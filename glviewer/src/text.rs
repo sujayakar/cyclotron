@@ -310,13 +310,12 @@ impl TextCache {
                         neighbors += scaled_sample(v_tex_pos + vec2(i * width, j * width));
                     }
                 }
-                neighbors = min(neighbors, 1.0);
 
                 // Clamp the border's contribution when this pixel is actually on at its center
                 // point so we don't try to render a border on the interior of the glyph.
-                float border = min(1.0 - center, neighbors);
+                float border = min(1.0 - center, neighbors) * 0.5;
 
-                f_color = vec4(vec3(1.0, 1.0, 1.0) * center + vec3(0.1, 0.1, 0.1) * border, max(center, border));
+                f_color = vec4(vec3(1.0, 1.0, 1.0) * center + vec3(0.05, 0.05, 0.05) * border, max(center, border));
             }
         "#;
         Program::from_source(display, vertex, fragment, None).unwrap()
