@@ -230,7 +230,6 @@ impl TextCache {
     }
 
     fn program(display: &Display) -> Program {
-        // TODO: Properly scale the last glyph that gets truncated.
         let vertex = r#"
             #version 140
 
@@ -258,13 +257,14 @@ impl TextCache {
 
                 // Add our glyph vector to the corner, scaling uniformly by the vertical scaling.
                 vec2 glyph0 = local_origin + (glyph * vec2(scale.y, scale.y));
+
                 // Clamp the x-coordinate if past the end of the task.
                 vec2 glyph1 = vec2(min(glyph0.x, task_right), glyph0.y);
-
                 vec2 glyph1_offset = glyph1 - 0.5;
                 gl_Position = vec4(2 * glyph1_offset.x, -2 * glyph1_offset.y, 0.0, 1.0);
 
-                v_tex_pos = tex_pos;
+                // Do the same to our texture coordinate.
+                v_tex_pos = vec2(tex_pos.x * (glyph1.x / glyph0.x), tex_pos.y);
                 v_tex_base = tex_base;
                 v_tex_dimensions = tex_dimensions;
             }
