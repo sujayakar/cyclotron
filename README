@@ -1,6 +1,3 @@
 $ git clone http://github.com/sujayakar/cyclotron
-$ cd cyclotron/frontend
-$ ./build.sh &
-$ cd ../server
-$ cargo run --release -- --http=3000 --ws=3001 --trace=../examples/empty_file_release.log
-# Open up localhost:3000 in your browser!
+$ cd cyclotron/glviewer
+$ cargo run --release -- ../examples/empty_file_release.log
