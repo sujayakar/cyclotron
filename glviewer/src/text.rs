@@ -250,7 +250,7 @@ impl TextCache {
             out vec4 f_color;
 
             void main() {
-                f_color = vec4(0.01, 0.01, 0.01, texture(tex, v_tex_coords).r);
+                f_color = vec4(1.0, 1.0, 1.0, texture(tex, v_tex_coords).r);
             }
         "#;
         Program::from_source(display, vertex, fragment, None).unwrap()

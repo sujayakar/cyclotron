@@ -338,7 +338,7 @@ fn rows(span: Span, layout: &Layout) -> Vec<Row> {
         for (rid, r) in t.rows.iter().enumerate() {
             let mut subrows = Vec::new();
 
-            for (ch, val, alpha) in &[(&r.back, true, 0.5), (&r.fore, false, 0.0)] {
+            for (ch, val, alpha) in &[(&r.back, true, 0.), (&r.fore, false, 0.5)] {
                 if ch.has_overlap(span) {
                     subrows.push(Subrow {
                         key: BoxListKey(ThreadId(tid), RowId(rid), *val),
