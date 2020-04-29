@@ -1,5 +1,3 @@
-use std::ops::Mul;
-
 pub trait Ident: Copy+Clone {
     fn to_usize(self) -> usize;
     fn from_usize(v: usize) -> Self;

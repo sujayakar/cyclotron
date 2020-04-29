@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use crate::db::{Span, NameId};
 use crate::render::Region;
 use glium::{
-    Blend,
     Display,
     DrawParameters,
     Frame,
@@ -15,7 +14,7 @@ use glium::{
     uniform,
 };
 use glium::index::{IndexBuffer, PrimitiveType};
-use glium::uniforms::MagnifySamplerFilter;
+use glium::uniforms::{MinifySamplerFilter, MagnifySamplerFilter};
 use glium::texture::{
     ClientFormat,
     MipmapsOption,
@@ -23,7 +22,7 @@ use glium::texture::{
     Texture2d,
     UncompressedFloatFormat,
 };
-use rusttype::gpu_cache::{Cache, TextureCoords};
+use rusttype::gpu_cache::Cache;
 use rusttype::{Rect, Vector};
 use rusttype::Font;
 
@@ -49,10 +48,12 @@ impl TextCache {
         let mut cache: Cache<'static> = Cache::builder()
             .dimensions(cache_width, cache_height)
             .build();
+
+        // TODO: Generate mipmaps to avoid aliasing when text is very small.
         let texture = Texture2d::with_format(
             display,
             RawImage2d {
-                data: Cow::Owned(vec![128u8; cache_width as usize * cache_height as usize]),
+                data: Cow::Owned(vec![0u8; cache_width as usize * cache_height as usize]),
                 width: cache_width,
                 height: cache_height,
                 format: ClientFormat::U8,
@@ -61,21 +62,24 @@ impl TextCache {
             MipmapsOption::NoMipmap,
         ).unwrap();
 
-        let scale = rusttype::Scale::uniform(24.0 * scale as f32);
+        let scale = rusttype::Scale::uniform(48. * scale as f32);
         let v_metrics = font.v_metrics(scale);
         let mut glyphs_by_name = HashMap::new();
-        println!("names: {:?}", names);
 
         for (string, &name_id) in names.iter() {
             let mut glyphs = vec![];
             let mut caret = rusttype::point(0.0, v_metrics.ascent);
             let mut last_glyph_id = None;
 
+            println!("Typesetting {}...", string);
+
             for c in string.chars() {
                 let base_glyph = font.glyph(c);
                 if let Some(id) = last_glyph_id.take() {
                     caret.x += font.pair_kerning(scale, id, base_glyph.id());
                 }
+                println!("  {} @ {:?}", c, caret);
+
                 last_glyph_id = Some(base_glyph.id());
                 let glyph = base_glyph.scaled(scale).positioned(caret);
                 caret.x += glyph.unpositioned().h_metrics().advance_width;
@@ -109,10 +113,7 @@ impl TextCache {
 
             for glyph in glyphs {
                 match cache.rect_for(0, &glyph) {
-                    Ok(Some(r)) => {
-                        println!("{:?}:{:?}", name_id, r.1);
-                        rectangles.push(r);
-                    },
+                    Ok(Some(r)) => rectangles.push(r),
                     // Characters like " " don't have associated glyphs.
                     Ok(None) => continue,
                     Err(..) => panic!("Failed to find {:?}", glyph),
@@ -144,9 +145,6 @@ impl TextCache {
 
         for (name_id, span) in labels {
             for ScaledGlyph { min, max, uv_rect } in self.labels.get(&name_id).unwrap() {
-                println!("{:?} {:?}", name_id, span);
-                println!("  {:?} {:?}", min, max);
-
                 let s = vertices.len() as u32;
                 let task_begin = (span.begin as f32) / 1e9;
                 let task_end = (span.end as f32) / 1e9;
@@ -191,9 +189,7 @@ impl TextCache {
     }
 
     fn program(display: &Display) -> Program {
-        // TODO:
-        // 1) Get the text "sticky" on the left side of the screen.
-        // 2) Properly scale the last glyph that gets truncated.
+        // TODO: Properly scale the last glyph that gets truncated.
         let vertex = r#"
             #version 140
 
@@ -208,12 +204,15 @@ impl TextCache {
             out vec2 v_tex_coords;
 
             void main() {
-                // Compute the bottom left corner and right coordinate of the task.
-                vec2 task_bottom_left = (vec2(task_begin, 0) + offset) * scale;
+                // Compute the left and right coordinates of the task.
+                float task_left = (task_begin + offset.x) * scale.x;
                 float task_right = (task_end + offset.x) * scale.x;
 
+                // Compute the bottom left corner of the task, clamping to the left side of the screen.
+                vec2 local_origin = vec2(max(task_left, 0.), offset.y * scale.y);
+
                 // Add our glyph vector to the corner, scaling uniformly by the vertical scaling.
-                vec2 glyph0 = task_bottom_left + (glyph * vec2(scale.y, scale.y));
+                vec2 glyph0 = local_origin + (glyph * vec2(scale.y, scale.y));
                 // Clamp the x-coordinate if past the end of the task.
                 vec2 glyph1 = vec2(min(glyph0.x, task_right), glyph0.y);
 
@@ -265,7 +264,8 @@ impl LabelListData {
             ],
             tex: text_cache.texture
                 .sampled()
-                .magnify_filter(MagnifySamplerFilter::Nearest)
+                .magnify_filter(MagnifySamplerFilter::Linear)
+                .minify_filter(MinifySamplerFilter::Nearest)
         };
         target.draw(
             &self.vertex_buffer,
