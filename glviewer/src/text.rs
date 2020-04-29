@@ -38,13 +38,26 @@ pub struct TextCache {
     program: Program,
 }
 
+// Texture size (before scale factor)
+const CACHE_SIZE: f64 = 512.;
+
+// Pixels per character (before scale factor)
+const FONT_SCALING: f32 = 48.;
+
+// Initial horizontal position for typesetting. (I'll be honest, I just played with this until it
+// looked nice.)
+const LABEL_LEFT_PADDING: f32 = 12.;
+
+// Use 3/4 of the rectangle for the label height.
+const LABEL_LINE_HEIGHT: f32 = 0.75;
+
 impl TextCache {
     pub fn new(display: &Display, names: &HashMap<String, NameId>) -> Self {
         let font_data = include_bytes!("../resources/Inconsolata-Regular.ttf");
         let font = Font::try_from_bytes(&font_data[..]).unwrap();
 
         let scale = display.gl_window().window().scale_factor();
-        let (cache_width, cache_height) = ((512.0 * scale) as u32, (512.0 * scale) as u32);
+        let (cache_width, cache_height) = ((CACHE_SIZE * scale) as u32, (CACHE_SIZE * scale) as u32);
         let mut cache: Cache<'static> = Cache::builder()
             .dimensions(cache_width, cache_height)
             .build();
@@ -62,24 +75,22 @@ impl TextCache {
             MipmapsOption::NoMipmap,
         ).unwrap();
 
-        let scale = rusttype::Scale::uniform(48. * scale as f32);
+        let scale = rusttype::Scale::uniform(FONT_SCALING * scale as f32);
         let v_metrics = font.v_metrics(scale);
         let mut glyphs_by_name = HashMap::new();
 
+        // First, have rusttype typeset all of our strings, creating a list of `PositionedGlyphs`
+        // per input string. Emit these to its GPU cache so it can accumulate them into a texture.
         for (string, &name_id) in names.iter() {
             let mut glyphs = vec![];
-            let mut caret = rusttype::point(0.0, v_metrics.ascent);
+            let mut caret = rusttype::point(LABEL_LEFT_PADDING, v_metrics.ascent);
             let mut last_glyph_id = None;
-
-            println!("Typesetting {}...", string);
 
             for c in string.chars() {
                 let base_glyph = font.glyph(c);
                 if let Some(id) = last_glyph_id.take() {
                     caret.x += font.pair_kerning(scale, id, base_glyph.id());
                 }
-                println!("  {} @ {:?}", c, caret);
-
                 last_glyph_id = Some(base_glyph.id());
                 let glyph = base_glyph.scaled(scale).positioned(caret);
                 caret.x += glyph.unpositioned().h_metrics().advance_width;
@@ -90,6 +101,7 @@ impl TextCache {
             glyphs_by_name.insert(name_id, glyphs);
         }
 
+        // Build the texture of all unique glyphs within our input strings.
         cache.cache_queued(|rect, data| {
             texture.main_level().write(
                 glium::Rect {
@@ -107,32 +119,41 @@ impl TextCache {
             );
         }).unwrap();
 
-        let mut labels = HashMap::with_capacity(glyphs_by_name.len());
+        // Pull out the positions of each glyph and their indices into the texture buffer. We want
+        // to scale the text to be of length `LABEL_LINE_HEIGHT`, so also keep track of the smallest
+        // and largest y values we see.
+        let mut rectangles_by_name_id = HashMap::with_capacity(glyphs_by_name.len());
+        let mut min_y = std::i32::MAX;
+        let mut max_y = 0;
         for (name_id, glyphs) in glyphs_by_name {
             let mut rectangles = Vec::with_capacity(glyphs.len());
-
             for glyph in glyphs {
-                match cache.rect_for(0, &glyph) {
-                    Ok(Some(r)) => rectangles.push(r),
+                let (uv_rect, screen_rect) = match cache.rect_for(0, &glyph) {
+                    Ok(Some(r)) => r,
                     // Characters like " " don't have associated glyphs.
                     Ok(None) => continue,
                     Err(..) => panic!("Failed to find {:?}", glyph),
                 };
+                min_y = std::cmp::min(min_y, screen_rect.min.y);
+                max_y = std::cmp::max(max_y, screen_rect.max.y);
+                rectangles.push((uv_rect, screen_rect));
             }
+            rectangles_by_name_id.insert(name_id, rectangles);
+        }
+        assert!(min_y < max_y);
+        // TODO: This isn't typographically correct. We should be using `VMetrics` somehow.
+        let scale = LABEL_LINE_HEIGHT / (max_y - min_y) as f32;
 
-            // Normalize the text size to height 1.
-            let scale = match rectangles.iter().map(|(_, r)| r.max.y).max() {
-                Some(m) => 1. / (m as f32),
-                None => continue,
-            };
-
+        // Now that we have the scale, do another pass to scale each rectangle and compute the final
+        // result to pass to `data` below.
+        let mut labels = HashMap::with_capacity(rectangles_by_name_id.len());
+        for (name_id, rectangles) in rectangles_by_name_id {
             let mut scaled_glyphs = Vec::with_capacity(rectangles.len());
             for (uv_rect, screen_rect) in rectangles {
                 let min = Vector { x: screen_rect.min.x as f32, y: screen_rect.min.y as f32 } * scale;
                 let max = Vector { x: screen_rect.max.x as f32, y: screen_rect.max.y as f32 } * scale;
                 scaled_glyphs.push(ScaledGlyph { min, max, uv_rect });
             }
-
             labels.insert(name_id, scaled_glyphs);
         }
 
@@ -229,8 +250,7 @@ impl TextCache {
             out vec4 f_color;
 
             void main() {
-                f_color = vec4(0.0, 0.0, 0.0, texture(tex, v_tex_coords).r);
-                // f_color = vec4(0.0, 0.0, 0.0, 1.0);
+                f_color = vec4(0.01, 0.01, 0.01, texture(tex, v_tex_coords).r);
             }
         "#;
         Program::from_source(display, vertex, fragment, None).unwrap()
@@ -265,7 +285,7 @@ impl LabelListData {
             tex: text_cache.texture
                 .sampled()
                 .magnify_filter(MagnifySamplerFilter::Linear)
-                .minify_filter(MinifySamplerFilter::Nearest)
+                .minify_filter(MinifySamplerFilter::Linear)
         };
         target.draw(
             &self.vertex_buffer,
@@ -274,5 +294,51 @@ impl LabelListData {
             &uniforms,
             params,
         ).unwrap();
+    }
+}
+
+#[test]
+fn test_typesetting() {
+    let font_data = include_bytes!("../resources/Inconsolata-Regular.ttf");
+    let font = Font::try_from_bytes(&font_data[..]).unwrap();
+    let scale = 2.0;
+    let (cache_width, cache_height) = ((512.0 * scale) as u32, (512.0 * scale) as u32);
+    let mut cache: Cache<'static> = Cache::builder()
+            .dimensions(cache_width, cache_height)
+            .build();
+    let scale = rusttype::Scale::uniform(48. * scale as f32);
+    let v_metrics = font.v_metrics(scale);
+    dbg!(v_metrics);
+
+    let mut caret = rusttype::point(0.0, v_metrics.ascent);
+    let mut last_glyph_id = None;
+    let mut glyphs = vec![];
+
+    println!("Typesetting...");
+
+    for c in "fg".chars() {
+        let base_glyph = font.glyph(c);
+        if let Some(id) = last_glyph_id.take() {
+            caret.x += font.pair_kerning(scale, id, base_glyph.id());
+        }
+        println!("{}: {:?}", c, caret);
+
+        last_glyph_id = Some(base_glyph.id());
+        let glyph = base_glyph.scaled(scale).positioned(caret);
+        caret.x += glyph.unpositioned().h_metrics().advance_width;
+        cache.queue_glyph(0, glyph.clone());
+        glyphs.push((c, glyph));
+    }
+
+    println!("\nCaching to texture...");
+
+    cache.cache_queued(|rect, data| {}).unwrap();
+
+    for (c, glyph) in glyphs {
+        if let Some((_uv_rect, screen_rect)) = cache.rect_for(0, &glyph).unwrap() {
+            println!("{}: {:?}", c, screen_rect);
+        } else {
+            println!("{}: no rect", c);
+        }
     }
 }
