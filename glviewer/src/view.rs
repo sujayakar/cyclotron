@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use crate::db::{Span, NameId, TaskId};
 use crate::layout::{Layout, ThreadId, RowId, BoxListKey, SpanRange, LabelListKey};
 use crate::render::{DrawCommand, Color, Region, SimpleRegion};
+use crate::util::hsl_to_rgb;
 
 pub struct View {
     cursor: (f64, f64),
@@ -218,13 +219,19 @@ impl View {
     pub fn draw_commands(&self) -> Vec<DrawCommand> {
         let mut res = Vec::new();
 
+        let (r, g, b) = hsl_to_rgb(0., 0.68, 0.35);
+        let primary_selection = Color { r, g, b, a: 1.0 };
+
+        let (r, g, b) = hsl_to_rgb(0.67, 0.90, 0.35);
+        let secondary_selection = Color { r, g, b, a: 1.0 };
+
         match &self.derived.mode {
             DerivedMode::Trace { rows, selection } => {
                 if let Some(total) = rows.last().map(|r| r.limit) {
                     let (name, highlight) = if let Some(selection) = selection {
-                        (Some(selection.name), Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 })
+                        (Some(selection.name), secondary_selection)
                     } else {
-                        (None, Color { r: 0.0, g: 0.0, b: 1.0, a: 0.0 })
+                        (None, secondary_selection)
                     };
 
                     for row in rows {
@@ -250,10 +257,10 @@ impl View {
                                 if selection.key == subrow.key {
                                     res.push(DrawCommand::BoxList {
                                         key: selection.key,
-                                        color: Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+                                        color: primary_selection,
                                         range: SpanRange { begin: selection.index, end: selection.index + 1 },
                                         name: None,
-                                        highlight: Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+                                        highlight: primary_selection,
                                         region,
                                     })
                                 }

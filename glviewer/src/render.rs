@@ -1,6 +1,7 @@
 use crate::layout::GroupId;
 use crate::view::View;
 use crate::db::{Span, NameId};
+use crate::util::hsl_to_rgb;
 use std::collections::HashMap;
 use crate::layout::{Layout, BoxListKey, LabelListKey, SpanRange};
 use crate::text::{TextCache, LabelListData};
@@ -317,8 +318,8 @@ impl RenderState {
         for _ in 0..256 {
             let (r, g, b) = hsl_to_rgb(
                 rng.gen_range(0.0, 1.0),
-                rng.gen_range(0.2, 0.8),
-                rng.gen_range(0.2, 0.5));
+                rng.gen_range(0.2, 0.5),
+                rng.gen_range(0.2, 0.3));
 
             colors.push((r, g, b, 1.0));
         }
@@ -386,44 +387,5 @@ impl RenderState {
                 },
             }
         }
-    }
-}
-
-fn hue_to_p(p: f32, q: f32, mut t: f32) -> f32 {
-    if t <0.00 {
-        t += 1.0;
-    }
-    if t > 1.0 {
-        t -= 1.0;
-    }
-    if t < 1.0/6.0 {
-        return p + (q - p) * 6.0 * t;
-    }
-    if t < 1.0/2.0 {
-        return q;
-    }
-    if t < 2.0/3.0 {
-        return p + (q - p) * (2.0/3.0 - t) * 6.0;
-    }
-    p
-}
-
-fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
-    if s == 0.0 {
-        (l, l, l)
-    } else {
-        let q = if l < 0.5 {
-            l * (1.0 + s)
-        } else {
-            l + s - l * s
-        };
-
-        let p = 2.0 * l - q;
-
-        (
-            hue_to_p(p, q, h + 1.0/3.0),
-            hue_to_p(p, q, h),
-            hue_to_p(p, q, h - 1.0/3.0),
-        )
     }
 }
