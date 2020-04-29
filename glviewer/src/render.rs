@@ -23,6 +23,10 @@ use glium::{
     DrawParameters,
 };
 
+// Save 5% of our row height for spacing.
+const BOX_START: f32 = 0.975;
+const BOX_END: f32 = 0.025;
+
 #[derive(Copy, Clone)]
 struct SimpleBoxVertex {
     position: [f32; 2],
@@ -107,10 +111,10 @@ impl BoxListData {
             let s = verts.len() as u32;
             tris.extend(&[s, s+1, s+2, s+1, s+2, s+3]);
 
-            verts.push(BoxListVertex { position: [(span.begin as f32) / 1e9, 0.0], group_ident });
-            verts.push(BoxListVertex { position: [(span.end as f32) / 1e9, 0.0], group_ident });
-            verts.push(BoxListVertex { position: [(span.begin as f32) / 1e9, 1.0], group_ident });
-            verts.push(BoxListVertex { position: [(span.end as f32) / 1e9, 1.0], group_ident });
+            verts.push(BoxListVertex { position: [(span.begin as f32) / 1e9, BOX_START], group_ident });
+            verts.push(BoxListVertex { position: [(span.end as f32) / 1e9, BOX_START], group_ident });
+            verts.push(BoxListVertex { position: [(span.begin as f32) / 1e9, BOX_END], group_ident });
+            verts.push(BoxListVertex { position: [(span.end as f32) / 1e9, BOX_END], group_ident });
         }
 
         let vertex = VertexBuffer::new(display, &verts).unwrap();
