@@ -9,7 +9,6 @@ use glium::{
     DrawParameters,
     Frame,
     Program,
-    Rect,
     Surface,
     VertexBuffer,
     implement_vertex,
@@ -25,10 +24,17 @@ use glium::texture::{
     UncompressedFloatFormat,
 };
 use rusttype::gpu_cache::{Cache, TextureCoords};
+use rusttype::{Rect, Vector};
 use rusttype::Font;
 
+struct ScaledGlyph {
+    min: Vector<f32>,
+    max: Vector<f32>,
+    uv_rect: Rect<f32>,
+}
+
 pub struct TextCache {
-    labels: HashMap<NameId, Vec<TextureCoords>>,
+    labels: HashMap<NameId, Vec<ScaledGlyph>>,
     texture: Texture2d,
     program: Program,
 }
@@ -58,6 +64,7 @@ impl TextCache {
         let scale = rusttype::Scale::uniform(24.0 * scale as f32);
         let v_metrics = font.v_metrics(scale);
         let mut glyphs_by_name = HashMap::new();
+        println!("names: {:?}", names);
 
         for (string, &name_id) in names.iter() {
             let mut glyphs = vec![];
@@ -81,7 +88,7 @@ impl TextCache {
 
         cache.cache_queued(|rect, data| {
             texture.main_level().write(
-                Rect {
+                glium::Rect {
                     left: rect.min.x,
                     bottom: rect.min.y,
                     width: rect.width(),
@@ -98,16 +105,34 @@ impl TextCache {
 
         let mut labels = HashMap::with_capacity(glyphs_by_name.len());
         for (name_id, glyphs) in glyphs_by_name {
-            let mut coords = Vec::with_capacity(glyphs.len());
+            let mut rectangles = Vec::with_capacity(glyphs.len());
+
             for glyph in glyphs {
                 match cache.rect_for(0, &glyph) {
-                    Ok(Some(r)) => coords.push(r),
+                    Ok(Some(r)) => {
+                        println!("{:?}:{:?}", name_id, r.1);
+                        rectangles.push(r);
+                    },
                     // Characters like " " don't have associated glyphs.
                     Ok(None) => continue,
                     Err(..) => panic!("Failed to find {:?}", glyph),
                 };
             }
-            labels.insert(name_id, coords);
+
+            // Normalize the text size to height 1.
+            let scale = match rectangles.iter().map(|(_, r)| r.max.y).max() {
+                Some(m) => 1. / (m as f32),
+                None => continue,
+            };
+
+            let mut scaled_glyphs = Vec::with_capacity(rectangles.len());
+            for (uv_rect, screen_rect) in rectangles {
+                let min = Vector { x: screen_rect.min.x as f32, y: screen_rect.min.y as f32 } * scale;
+                let max = Vector { x: screen_rect.max.x as f32, y: screen_rect.max.y as f32 } * scale;
+                scaled_glyphs.push(ScaledGlyph { min, max, uv_rect });
+            }
+
+            labels.insert(name_id, scaled_glyphs);
         }
 
         Self { labels, texture, program: Self::program(display) }
@@ -117,51 +142,36 @@ impl TextCache {
         let mut vertices = vec![];
         let mut triangles = vec![];
 
-        let (screen_width, screen_height) = {
-            let (w, h) = display.get_framebuffer_dimensions();
-            (w as f32, h as f32)
-        };
-        let origin = rusttype::point(0.0, 0.0);
-
         for (name_id, span) in labels {
-            let texture_coords = self.labels.get(&name_id).unwrap();
-
-            for (uv_rect, screen_rect) in texture_coords {
-                let min_v = rusttype::vector(
-                    screen_rect.min.x as f32 / screen_width - 0.5,
-                    1.0 - screen_rect.min.y as f32 / screen_height - 0.5,
-                );
-                let max_v = rusttype::vector(
-                    screen_rect.max.x as f32 / screen_width - 0.5,
-                    1.0 - screen_rect.max.y as f32 / screen_height - 0.5,
-                );
-                let gl_rect = rusttype::Rect {
-                    min: origin + min_v * 2.0,
-                    max: origin + max_v * 2.0,
-                };
+            for ScaledGlyph { min, max, uv_rect } in self.labels.get(&name_id).unwrap() {
                 let s = vertices.len() as u32;
                 vertices.extend(&[
                     TextVertex {
-                        glyph_position: [gl_rect.min.x, gl_rect.min.y],
-                        task_position: [(span.begin as f32) / 1e9, 0.],
+                        glyph: [min.x, min.y],
+                        task_begin: span.begin as f32,
+                        task_end: span.end as f32,
                         tex_coords: [uv_rect.min.x, uv_rect.min.y],
                     },
                     TextVertex {
-                        glyph_position: [gl_rect.max.x, gl_rect.min.y],
-                        task_position: [(span.end as f32) / 1e9, 0.],
+                        glyph: [max.x, min.y],
+                        task_begin: span.begin as f32,
+                        task_end: span.end as f32,
                         tex_coords: [uv_rect.max.x, uv_rect.min.y],
                     },
                     TextVertex {
-                        glyph_position: [gl_rect.min.x, gl_rect.max.y],
-                        task_position: [(span.begin as f32) / 1e9, 1.],
+                        glyph: [min.x, max.y],
+                        task_begin: span.begin as f32,
+                        task_end: span.end as f32,
                         tex_coords: [uv_rect.min.x, uv_rect.max.y],
                     },
                     TextVertex {
-                        glyph_position: [gl_rect.max.x, gl_rect.max.y],
-                        task_position: [(span.end as f32) / 1e9, 1.],
+                        glyph: [max.x, max.y],
+                        task_begin: span.begin as f32,
+                        task_end: span.end as f32,
                         tex_coords: [uv_rect.max.x, uv_rect.max.y],
                     },
                 ]);
+
                 triangles.extend(&[s, s+1, s+2, s+1, s+2, s+3]);
             }
         }
@@ -179,8 +189,9 @@ impl TextCache {
         let vertex = r#"
             #version 140
 
-            in vec2 glyph_position;
-            in vec2 task_position;
+            in vec2 glyph;
+            in float task_begin;
+            in float task_end;
             in vec2 tex_coords;
 
             uniform vec2 scale;
@@ -191,7 +202,9 @@ impl TextCache {
             void main() {
                 vec2 pos0 = (task_position + offset) * scale;
                 vec2 pos0_offset = pos0 - 0.5;
+
                 gl_Position = vec4(2 * pos0_offset.x, -2 * pos0_offset.y, 0.0, 1.0);
+                v_tex_coords = tex_coords;
             }
         "#;
                 // gl_Position = vec4(position, 0.0, 1.0);
@@ -204,21 +217,21 @@ impl TextCache {
             out vec4 f_color;
 
             void main() {
-                f_color = vec4(0.0, 0.0, 0.0, 1.0);
+                f_color = vec4(0.0, 0.0, 0.0, texture(tex, v_tex_coords).r);
             }
         "#;
-        // texture(tex, v_tex_coords).r);
         Program::from_source(display, vertex, fragment, None).unwrap()
     }
 }
 
 #[derive(Copy, Clone)]
 struct TextVertex {
-    glyph_position: [f32; 2],
-    task_position: [f32; 2],
+    glyph: [f32; 2],
+    task_begin: f32,
+    task_end: f32,
     tex_coords: [f32; 2],
 }
-implement_vertex!(TextVertex, glyph_position, task_position, tex_coords);
+implement_vertex!(TextVertex, glyph, task_begin, task_end, tex_coords);
 
 pub struct LabelListData {
     vertex_buffer: VertexBuffer<TextVertex>,

@@ -11,7 +11,7 @@ pub struct Span {
     pub end: u64,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct NameId(pub u32);
 
 impl Ident for NameId {
