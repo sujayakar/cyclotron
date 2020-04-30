@@ -89,6 +89,7 @@ fn main() {
                     let dims = display.get_framebuffer_dimensions();
                     view.hover(&layout, (position.x / dims.0 as f64, position.y / dims.1 as f64));
                     // println!("cursor time: {:?}", Duration::from_nanos(view.cursor_time()));
+                    return;
                 }
                 glutin::event::WindowEvent::ReceivedCharacter(ch) => {
                     match &mut input_mode {
@@ -150,7 +151,6 @@ fn main() {
                                 }
                                 glutin::event::VirtualKeyCode::Q => {
                                     *control_flow = glutin::event_loop::ControlFlow::Exit;
-                                    return;
                                 }
                                 glutin::event::VirtualKeyCode::P => {
                                     if pressed {
@@ -176,12 +176,13 @@ fn main() {
                             }
                         }
                     }
+                    return;
                 }
                 glutin::event::WindowEvent::MouseInput { state, button: glutin::event::MouseButton::Left, .. } => {
                     match state {
                         glutin::event::ElementState::Pressed => {
                             click_down_time = Some(Instant::now());
-                            view.begin_drag()
+                            view.begin_drag();
                         }
                         glutin::event::ElementState::Released => {
                             if click_down_time.unwrap().elapsed() > Duration::from_millis(100) {
@@ -191,6 +192,7 @@ fn main() {
                             }
                         },
                     }
+                    return;
                 }
                 _ => {
                     // println!("{:?}", event);
@@ -204,12 +206,16 @@ fn main() {
             },
             glutin::event::Event::MainEventsCleared |
             glutin::event::Event::RedrawEventsCleared => return,
-            glutin::event::Event::DeviceEvent { event, .. } => match event {
-                glutin::event::DeviceEvent::MouseWheel { delta:
-                    glutin::event::MouseScrollDelta::PixelDelta(delta) } => {
-                    view.scroll(&layout, -delta.x, delta.y);
+            glutin::event::Event::DeviceEvent { event, .. } => {
+                match event {
+                    glutin::event::DeviceEvent::MouseWheel {
+                        delta: glutin::event::MouseScrollDelta::PixelDelta(delta),
+                    } => {
+                        view.scroll(&layout, -delta.x, delta.y);
+                    }
+                    _ => {}
                 }
-                _ => {}
+                return;
             },
             _ => {
                 return;

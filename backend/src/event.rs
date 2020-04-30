@@ -25,6 +25,7 @@ pub enum TraceEvent {
         id: SpanId,
         parent_id: SpanId,
         ts: Duration,
+        #[serde(default)]
         metadata: serde_json::Value,
     },
     AsyncOnCPU {
@@ -46,6 +47,7 @@ pub enum TraceEvent {
         id: SpanId,
         parent_id: SpanId,
         ts: Duration,
+        #[serde(default)]
         metadata: serde_json::Value,
     },
     SyncEnd {
