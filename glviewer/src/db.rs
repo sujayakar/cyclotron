@@ -23,9 +23,10 @@ impl Ident for NameId {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Hash, Ord)]
 pub struct TaskId(pub u32);
 
+#[derive(Debug)]
 pub struct Task {
     pub id: TaskId,
     pub parent: Option<TaskId>,
@@ -77,7 +78,6 @@ pub struct Database {
 }
 
 impl Database {
-
     pub fn name(&self, name: NameId) -> &str {
         self.names.names[name.0 as usize].as_str()
     }
@@ -100,6 +100,16 @@ impl Database {
 
     pub fn task(&self, task: TaskId) -> &Task {
         &self.tasks[task.0 as usize]
+    }
+
+    #[cfg(test)]
+    pub fn test(tasks: Vec<Task>) -> Self {
+        Self {
+            tasks,
+            names: NameTable::new(),
+            wakes: vec![],
+            parks: vec![],
+        }
     }
 
     pub fn load(path: impl AsRef<Path>) -> Database {

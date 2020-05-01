@@ -1,5 +1,6 @@
 mod db;
 mod layout;
+mod layout_algorithm;
 mod render;
 mod view;
 mod text;

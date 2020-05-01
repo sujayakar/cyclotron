@@ -400,7 +400,7 @@ fn test_typesetting() {
 
     println!("\nCaching to texture...");
 
-    cache.cache_queued(|rect, data| {}).unwrap();
+    cache.cache_queued(|_, _| {}).unwrap();
 
     for (c, glyph) in glyphs {
         if let Some((_uv_rect, screen_rect)) = cache.rect_for(0, &glyph).unwrap() {

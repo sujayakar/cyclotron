@@ -1,8 +1,6 @@
 use crate::util::VecDefaultMap;
-use std::collections::HashMap;
-use bit_set::BitSet;
 use crate::db::{Database, TaskId, Task, Span, NameId};
-use std::collections::HashSet;
+use crate::layout_algorithm::layout;
 use std::time::Duration;
 
 pub struct Layout {
@@ -19,37 +17,24 @@ pub struct SpanRange {
     pub end: usize,
 }
 
-impl Thread {
-    fn find_row(&mut self, span: Span, is_thread: bool) -> RowId {
-        if !is_thread {
-            for (id, row) in self.rows.iter().enumerate() {
-                if !row.back.has_overlap(span) && !row.fore.has_overlap(span) && !row.reserve.has_overlap(span) {
-                    return RowId(id);
-                }
-            }
-        }
-        let id = self.rows.len();
-        self.rows.push(Row {
-            is_thread,
-            fore: Chunk::new(),
-            back: Chunk::new(),
-            reserve: Chunk::new(),
-            labels: LabelChunk::default(),
-        });
-        RowId(id)
-    }
-}
-
 pub struct Row {
     is_thread: bool,
     pub fore: Chunk,
     pub back: Chunk,
-    reserve: Chunk,
     pub labels: LabelChunk,
 }
 
 impl Row {
-    fn add(&mut self, task: &Task) {
+    pub fn new(is_thread: bool) -> Self {
+        Self {
+            is_thread,
+            fore: Chunk::new(),
+            back: Chunk::new(),
+            labels: LabelChunk::default(),
+        }
+    }
+
+    pub fn add(&mut self, task: &Task) {
         if let Some(on_cpu) = task.on_cpu.as_ref() {
             self.back.add(task.span, task.name, task.id);
             assert!(!self.fore.has_overlap(task.span));
@@ -178,29 +163,6 @@ impl Chunk {
     }
 }
 
-#[test]
-fn test_has_overlap() {
-    let chunk = Chunk {
-        begins: vec![1, 3, 10],
-        ends:   vec![2, 5, 15],
-        names: vec![NameId(1), NameId(1), NameId(1)],
-        tasks: vec![TaskId(1), TaskId(2), TaskId(3)],
-        groups: vec![],
-    };
-    assert!(chunk.has_overlap(Span { begin: 0, end: 20 }));
-    assert!(!chunk.has_overlap(Span { begin: 2, end: 3 }));
-    assert!(chunk.has_overlap(Span { begin: 2, end: 4 }));
-    assert!(chunk.has_overlap(Span { begin: 4, end: 5 }));
-    assert!(chunk.has_overlap(Span { begin: 4, end: 6 }));
-    assert!(!chunk.has_overlap(Span { begin: 6, end: 7 }));
-    assert!(!chunk.has_overlap(Span { begin: 17, end: 30 }));
-
-    let mut c = chunk.clone();
-    c.add(Span { begin: 2, end: 3 }, NameId(2), TaskId(5));
-    assert_eq!(c.begins, vec![1, 2, 3, 10]);
-    assert_eq!(c.ends,   vec![2, 3, 5, 15]);
-}
-
 pub struct ChunkSpanIter<'a> {
     begins: &'a [u64],
     ends: &'a [u64],
@@ -243,86 +205,23 @@ pub struct BoxListKey(pub ThreadId, pub RowId, pub bool);
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct LabelListKey(pub ThreadId, pub RowId);
 
-struct RowAssignment {
-    // thread: ThreadId,
-    // row: RowId,
-    children: Option<RowId>,
-}
-
-pub struct LayoutBuilder {
-    tasks_by_name: VecDefaultMap<NameId, usize>,
-    children: HashMap<TaskId, Vec<TaskId>>,
-    task_to_thread: HashMap<TaskId, ThreadId>,
-    threads: Vec<Thread>,
-    assignments: HashMap<TaskId, RowAssignment>,
-}
-
-impl LayoutBuilder {
-    fn add(&mut self, task: &Task) {
-        let thread_id = if let Some(parent) = task.parent {
-            self.task_to_thread[&parent]
-        } else {
-            let thread_id = ThreadId(self.threads.len());
-            self.threads.push(Thread {
-                rows: Vec::new(),
-            });
-            thread_id
-        };
-
-        *self.tasks_by_name.entry(task.name) += 1;
-
-        self.task_to_thread.insert(task.id, thread_id);
-
-        let thread = &mut self.threads[thread_id.0];
-
-        let row = if let Some(parent) = task.parent {
-            let row_id = self.assignments[&parent].children.unwrap();
-            let row = &thread.rows[row_id.0];
-            if row.fore.has_overlap(task.span) || row.back.has_overlap(task.span) {
-                thread.find_row(task.span, task.parent.is_none())
-            } else {
-                row_id
-            }
-        } else {
-            thread.find_row(task.span, task.parent.is_none())
-        };
-
-        thread.rows[row.0].add(task);
-
-        let children = if self.children.contains_key(&task.id) {
-            let child_row = thread.find_row(task.span, task.parent.is_none());
-            thread.rows[child_row.0].reserve.add(task.span, task.name, task.id);
-            Some(child_row)
-        } else {
-            None
-        };
-
-        self.assignments.insert(task.id, RowAssignment {
-            // thread: thread_id,
-            // row,
-            children,
-        });
-    }
-
-    fn compute_task_name_table(&self) -> VecDefaultMap<NameId, GroupId> {
-        let mut res = VecDefaultMap::new();
-
+impl Layout {
+    pub fn new(db: &Database, filter: Option<&str>) -> Layout {
+        assert!(filter.is_none());
+        let mut threads = layout(db);
+        let mut tasks_by_name: VecDefaultMap<NameId, usize> = VecDefaultMap::new();
+        for task in &db.tasks {
+            *tasks_by_name.entry(task.name) += 1;
+        }
+        let mut table = VecDefaultMap::new();
         let mut group_colors = 1;
-
-        for (name, count) in &self.tasks_by_name {
+        for (name, count) in &tasks_by_name {
             if *count > 0 {
                 group_colors += 1;
-                *res.entry(name) = GroupId(group_colors);
+                *table.entry(name) = GroupId(group_colors);
             }
         }
-
-        res
-    }
-
-    fn fill_group_names(&mut self) {
-        let table = self.compute_task_name_table();
-
-        for thread in &mut self.threads {
+        for thread in &mut threads {
             for row in &mut thread.rows {
                 for chunk in &mut [&mut row.back, &mut row.fore] {
                     for name in &chunk.names {
@@ -331,74 +230,7 @@ impl LayoutBuilder {
                 }
             }
         }
-    }
-}
-
-impl Layout {
-    pub fn new(db: &Database, filter: Option<&str>) -> Layout {
-        let mut filtered_names = BitSet::new();
-
-        if let Some(filter) = filter {
-            for (id, name) in db.names().enumerate() {
-                if name.find(filter).is_some() {
-                    filtered_names.insert(id);
-                }
-            }
-        }
-
-        let mut children = HashMap::new();
-        for task in &db.tasks {
-            if let Some(parent) = task.parent {
-                children.entry(parent).or_insert_with(Vec::new).push(task.id);
-            }
-        }
-
-        let mut b = LayoutBuilder {
-            tasks_by_name: VecDefaultMap::new(),
-            children,
-            task_to_thread: HashMap::new(),
-            threads: Vec::new(),
-            assignments: HashMap::new(),
-        };
-
-        if filter.is_some() {
-            let mut parents = Vec::new();
-            let mut parent_tasks = HashSet::new();
-
-            for task in &db.tasks {
-                if filtered_names.contains(task.name.0 as usize) {
-                    if let Some(parent) = task.parent {
-                        parents.push(parent);
-                        parent_tasks.insert(parent);
-                    }
-                }
-            }
-
-            while let Some(parent) = parents.pop() {
-                let task = &db.tasks[parent.0 as usize];
-
-                if let Some(parent) = task.parent {
-                    parents.push(parent);
-                    parent_tasks.insert(parent);
-                }
-            }
-
-            for task in &db.tasks {
-                if parent_tasks.contains(&task.id) || filtered_names.contains(task.name.0 as usize) {
-                    b.add(task)
-                }
-            }
-        } else {
-            for task in &db.tasks {
-                b.add(task)
-            }
-        }
-
-        b.fill_group_names();
-
-        Layout {
-            threads: b.threads,
-        }
+        Layout { threads }
     }
 
     pub fn span_discounting_threads(&self) -> Span {
@@ -476,4 +308,27 @@ impl Layout {
             }
         }
     }
+}
+
+#[test]
+fn test_has_overlap() {
+    let chunk = Chunk {
+        begins: vec![1, 3, 10],
+        ends:   vec![2, 5, 15],
+        names: vec![NameId(1), NameId(1), NameId(1)],
+        tasks: vec![TaskId(1), TaskId(2), TaskId(3)],
+        groups: vec![],
+    };
+    assert!(chunk.has_overlap(Span { begin: 0, end: 20 }));
+    assert!(!chunk.has_overlap(Span { begin: 2, end: 3 }));
+    assert!(chunk.has_overlap(Span { begin: 2, end: 4 }));
+    assert!(chunk.has_overlap(Span { begin: 4, end: 5 }));
+    assert!(chunk.has_overlap(Span { begin: 4, end: 6 }));
+    assert!(!chunk.has_overlap(Span { begin: 6, end: 7 }));
+    assert!(!chunk.has_overlap(Span { begin: 17, end: 30 }));
+
+    let mut c = chunk.clone();
+    c.add(Span { begin: 2, end: 3 }, NameId(2), TaskId(5));
+    assert_eq!(c.begins, vec![1, 2, 3, 10]);
+    assert_eq!(c.ends,   vec![2, 3, 5, 15]);
 }
