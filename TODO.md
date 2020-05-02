@@ -3,3 +3,5 @@
 - [ ] Collapsing spans and their children
 - [ ] Status line at the bottom to replace terminal state
 - [ ] UI for search
+- [ ] Make text window ratio invariant
+- [ ] The text border rendering hurts clarity at small sizes
