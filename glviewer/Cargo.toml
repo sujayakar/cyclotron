@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Joshua Warner <joshw@dropbox.com>"]
 edition = "2018"
 
+[profile.release]
+debug = 2
+
 [dependencies]
 cyclotron-backend = { path = "../backend"}
 structopt = "0.3.12"
