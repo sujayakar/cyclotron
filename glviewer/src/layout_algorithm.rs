@@ -1,12 +1,13 @@
 use crate::db::{Database, TaskId, Span};
 use super::layout::{Thread, Row};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::ops::Bound;
 use std::time::Instant;
 
 // Rectangle for laying out a task and all of its children. A leaf task will have height one, but a
 // task with children will have a rectangle that's the bounding box of its rectangle and all of its
 // descendents.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 struct LayoutRect {
     time: Span,
     row: u64,
@@ -35,6 +36,7 @@ struct LocalLayout {
     // 1      | [ First child ] [ Third child ]
     // 2      |        [   Second child   ]
     children: HashMap<TaskId, LayoutRect>,
+    children_by_end: BTreeSet<(u64, TaskId)>,
 }
 
 impl LocalLayout {
@@ -42,11 +44,18 @@ impl LocalLayout {
         Self {
             total_height: 1,
             children: HashMap::new(),
+            children_by_end: BTreeSet::new(),
         }
     }
 
     // TODO: This is easy to improve algorithmically but Good Enough for now.
     fn add_rect(&mut self, task_id: TaskId, span: Span, height: u64) {
+        // To have a rectangle overlap, its end must be greater than our begin.
+        let horizontal_overlap = self.children_by_end
+            .range((Bound::Excluded((span.begin, task_id)), Bound::Unbounded))
+            .map(|(_, task_id)| task_id)
+            .collect::<Vec<_>>();
+
         // Use the smallest `candidate_height` that leads to no overlapping.
         for candidate_height in 1.. {
             let candidate = LayoutRect {
@@ -54,9 +63,13 @@ impl LocalLayout {
                 row: candidate_height,
                 height,
             };
-            if !self.children.values().any(|r| r.overlaps(&candidate)) {
+            let any_overlap = horizontal_overlap
+                .iter()
+                .any(|task_id| self.children[task_id].overlaps(&candidate));
+            if !any_overlap {
                 self.total_height = std::cmp::max(self.total_height, candidate_height + height);
                 self.children.insert(task_id, candidate);
+                self.children_by_end.insert((candidate.time.end, task_id));
                 return;
             }
         }
