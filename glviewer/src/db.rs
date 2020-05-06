@@ -1,3 +1,5 @@
+use std::io::Read;
+use flate2::read::GzDecoder;
 use regex::Regex;
 use bit_set::BitSet;
 use crate::util::Ident;
@@ -156,7 +158,19 @@ impl Database {
         let mut task_ids = HashMap::new();
         let mut names = NameTable::new();
         let mut wakes_wip = Vec::new();
-        let mut file = BufReader::new(File::open(path).unwrap());
+        let path = path.as_ref();
+        let file = File::open(path).unwrap();
+        let file: Box<dyn Read> = if let Some(ext) = path.extension() {
+            if ext == "gz" {
+                println!("decoding gzip...");
+                Box::new(GzDecoder::new(file))
+            } else {
+                Box::new(file)
+            }
+        } else {
+            Box::new(file)
+        };
+        let mut file = BufReader::new(file);
 
         let mut max_ts = 0;
 
