@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use crate::db::{Span, NameId, TaskId};
+use std::collections::{HashSet, HashMap};
+use crate::db::{Span, NameId, NameIdSet, TaskId};
 use crate::layout::{Layout, ThreadId, RowId, BoxListKey, SpanRange, LabelListKey};
 use crate::render::{DrawCommand, Color, Region, SimpleRegion};
 use crate::util::hsl_to_rgb;
@@ -11,6 +11,7 @@ pub struct View {
     derived: Derived,
     limits: Span,
     span: Span,
+    filter: HashSet<(ThreadId, RowId)>,
 }
 
 fn bounded(a: u64, b: u64, c: u64) -> u64 {
@@ -87,13 +88,15 @@ impl View {
         let limits = layout.span_discounting_threads();
         let cursor = (0.0, 0.0);
         let mode = Mode::Trace;
+        let filter = compute_filtered_row_set(None, layout);
         View {
             cursor,
             mode,
             cursor_down: None,
-            derived: derived(cursor, limits, mode, layout),
+            derived: derived(&filter, cursor, limits, mode, layout),
             limits,
             span: limits,
+            filter,
         }
     }
 
@@ -102,12 +105,7 @@ impl View {
             Mode::Trace => Mode::Profile,
             Mode::Profile => Mode::Trace,
         };
-        self.derived = derived(self.cursor, self.span, self.mode, layout);
-    }
-
-    pub fn relayout(&mut self, layout: &Layout) {
-        self.limits = layout.span_discounting_threads();
-        self.set_span(layout, self.span);
+        self.invalidate(layout);
     }
 
     pub fn begin_drag(&mut self) {
@@ -116,6 +114,12 @@ impl View {
 
     pub fn cancel_drag(&mut self) {
         self.cursor_down = None;
+    }
+
+    pub fn set_filter(&mut self, filter: Option<NameIdSet>, layout: &Layout) {
+        self.filter = compute_filtered_row_set(filter.as_ref(), &layout);
+        println!("visible rows {:?}", self.filter.len());
+        self.invalidate(layout);
     }
 
     // Returns the old span
@@ -174,7 +178,7 @@ impl View {
         self.span.begin = bounded(self.limits.begin, span.begin, self.limits.end - MIN_WIDTH as u64);
         self.span.end = bounded(self.span.begin + MIN_WIDTH as u64, span.end, self.limits.end);
 
-        self.derived = derived(self.cursor, self.span, self.mode, layout);
+        self.invalidate(layout);
     }
 
     pub fn set_span_full(&mut self, layout: &Layout) {
@@ -213,7 +217,7 @@ impl View {
 
         self.span.begin = bounded(self.limits.begin, maxf(0.0, new_begin) as u64, self.limits.end - MIN_WIDTH as u64);
         self.span.end = bounded(self.span.begin + MIN_WIDTH as u64, new_end as u64, self.limits.end);
-        self.derived = derived(self.cursor, self.span, self.mode, layout);
+        self.invalidate(layout);
     }
 
     pub fn draw_commands(&self) -> Vec<DrawCommand> {
@@ -335,14 +339,22 @@ impl View {
 
         res
     }
+
+    fn invalidate(&mut self, layout: &Layout) {
+        self.derived = derived(&self.filter, self.cursor, self.span, self.mode, layout);
+    }
 }
 
-fn rows(span: Span, layout: &Layout) -> Vec<Row> {
+fn rows(filter: &HashSet<(ThreadId, RowId)>, span: Span, layout: &Layout) -> Vec<Row> {
     let mut res = Vec::new();
     let mut base = 0.0;
 
     for (tid, t) in layout.threads.iter().enumerate() {
         for (rid, r) in t.rows.iter().enumerate() {
+            if !filter.contains(&(ThreadId(tid), RowId(rid))) {
+                continue;
+            }
+
             let mut subrows = Vec::new();
 
             for (ch, val, alpha) in &[(&r.back, true, 0.), (&r.fore, false, 0.5)] {
@@ -372,14 +384,18 @@ fn rows(span: Span, layout: &Layout) -> Vec<Row> {
     res
 }
 
-fn profile_rows(span: Span, layout: &Layout) -> Vec<ProfileThread> {
+fn profile_rows(filter: &HashSet<(ThreadId, RowId)>, span: Span, layout: &Layout) -> Vec<ProfileThread> {
     let mut res = Vec::new();
     let mut base = 0.0;
 
-    for (_tid, t) in layout.threads.iter().enumerate() {
+    for (tid, t) in layout.threads.iter().enumerate() {
         let mut cpu_time_per_name = HashMap::new();
 
-        for (_rid, r) in t.rows.iter().enumerate() {
+        for (rid, r) in t.rows.iter().enumerate() {
+            if !filter.contains(&(ThreadId(tid), RowId(rid))) {
+                continue;
+            }
+
             for (name, (begin, end)) in r.fore.names.iter().zip(r.fore.begins.iter().zip(&r.fore.ends)) {
                 let begin = std::cmp::max(*begin, span.begin);
                 let end = std::cmp::max(begin, std::cmp::min(*end, span.end));
@@ -473,10 +489,32 @@ fn find_profile_selection(cursor: (f64, f64), span: Span, threads: &[ProfileThre
     None
 }
 
-fn derived(cursor: (f64, f64), span: Span, mode: Mode, layout: &Layout) -> Derived {
+fn compute_filtered_row_set(names: Option<&NameIdSet>, layout: &Layout) -> HashSet<(ThreadId, RowId)> {
+    let mut res = HashSet::new();
+
+    if let Some(names) = names {
+        for (tid, t) in layout.threads.iter().enumerate() {
+            for (rid, r) in t.rows.iter().enumerate() {
+                if r.name_set.overlaps(names) {
+                    res.insert((ThreadId(tid), RowId(rid)));
+                }
+            }
+        }
+    } else {
+        for (tid, t) in layout.threads.iter().enumerate() {
+            for (rid, _r) in t.rows.iter().enumerate() {
+                res.insert((ThreadId(tid), RowId(rid)));
+            }
+        }
+    }
+
+    res
+}
+
+fn derived(filter: &HashSet<(ThreadId, RowId)>, cursor: (f64, f64), span: Span, mode: Mode, layout: &Layout) -> Derived {
     match mode {
         Mode::Trace => {
-            let rows = rows(span, layout);
+            let rows = rows(filter, span, layout);
 
             let selection = find_selection(cursor, span, &rows, layout);
 
@@ -488,7 +526,7 @@ fn derived(cursor: (f64, f64), span: Span, mode: Mode, layout: &Layout) -> Deriv
             }
         }
         Mode::Profile => {
-            let threads = profile_rows(span, layout);
+            let threads = profile_rows(filter, span, layout);
 
             let selection = find_profile_selection(cursor, span, &threads, layout);
 

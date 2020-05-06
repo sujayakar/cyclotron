@@ -14,6 +14,7 @@ use crate::view::{View, SelectionInfo};
 use crate::render::RenderState;
 use crate::text::TextCache;
 
+use regex::Regex;
 use glium::{
     glutin,
     Surface,
@@ -46,7 +47,7 @@ fn main() {
     let args = Args::from_args();
 
     let db = Database::load(&args.trace);
-    let mut layout = Layout::new(&db, None);
+    let mut layout = Layout::new(&db);
 
     let event_loop = glutin::event_loop::EventLoop::new();
     let wb = glutin::window::WindowBuilder::new()
@@ -102,21 +103,16 @@ fn main() {
                         InputMode::Search(ref mut text) => {
                             if ch == '\r' {
                                 println!("Search {:?}", text);
-                                let new_layout = Layout::new(&db, Some(&text));
-                                let span_count = new_layout.span_count();
-                                println!("  found {} spans", span_count);
-                                if span_count > 0 {
-                                    layout = new_layout;
-                                    println!("  (type <slash><return> to get return to normal view)");
-
-                                    view.relayout(&layout);
-
-                                    if text == "" {
-                                        view.set_span_full(&layout);
+                                match Regex::new(&format!(".*{}.*", text)) {
+                                    Ok(regex) => {
+                                        let name_set = db.names_matching_regex(regex);
+                                        println!("matching names: {:?}", name_set.count_len());
+                                        view.set_filter(Some(name_set), &layout);
                                     }
-                                    render.rebuild(&layout, &display);
+                                    Err(e) => {
+                                        println!("error parsing regex: {:?}", e);
+                                    }
                                 }
-
                                 input_mode = InputMode::Navigate;
                             } else {
                                 text.push(ch);

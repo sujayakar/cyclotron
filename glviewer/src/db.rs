@@ -1,3 +1,5 @@
+use regex::Regex;
+use bit_set::BitSet;
 use crate::util::Ident;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, BufRead};
@@ -18,8 +20,33 @@ impl Ident for NameId {
     fn to_usize(self) -> usize {
         self.0 as usize
     }
+
     fn from_usize(v: usize) -> Self {
         Self(v as u32)
+    }
+}
+
+pub struct NameIdSet {
+    bits: BitSet,
+}
+
+impl NameIdSet {
+    pub fn new() -> NameIdSet {
+        NameIdSet {
+            bits: BitSet::new(),
+        }
+    }
+
+    pub fn insert(&mut self, name: NameId) {
+        self.bits.insert(name.0 as usize);
+    }
+
+    pub fn overlaps(&self, other: &NameIdSet) -> bool {
+        self.bits.intersection(&other.bits).next().is_some()
+    }
+
+    pub fn count_len(&self) -> usize {
+        self.bits.iter().count()
     }
 }
 
@@ -88,6 +115,16 @@ impl Database {
 
     pub fn name_ids_by_name(&self) -> &HashMap<String, NameId> {
         &self.names.by_name
+    }
+
+    pub fn names_matching_regex(&self, regex: Regex) -> NameIdSet {
+        let mut res = NameIdSet::new();
+        for (name_str, name_id) in &self.names.by_name {
+            if regex.is_match(name_str) {
+                res.insert(*name_id);
+            }
+        }
+        res
     }
 
     pub fn wakes(&self, task: TaskId) -> &[Wake] {

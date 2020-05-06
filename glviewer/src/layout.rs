@@ -1,5 +1,5 @@
 use crate::util::VecDefaultMap;
-use crate::db::{Database, TaskId, Task, Span, NameId};
+use crate::db::{Database, TaskId, Task, Span, NameId, NameIdSet};
 use crate::layout_algorithm::layout;
 use std::time::Duration;
 
@@ -22,6 +22,7 @@ pub struct Row {
     pub fore: Chunk,
     pub back: Chunk,
     pub labels: LabelChunk,
+    pub name_set: NameIdSet,
 }
 
 impl Row {
@@ -31,10 +32,12 @@ impl Row {
             fore: Chunk::new(),
             back: Chunk::new(),
             labels: LabelChunk::default(),
+            name_set: NameIdSet::new(),
         }
     }
 
     pub fn add(&mut self, task: &Task) {
+        self.name_set.insert(task.name);
         if let Some(on_cpu) = task.on_cpu.as_ref() {
             self.back.add(task.span, task.name, task.id);
             assert!(!self.fore.has_overlap(task.span));
@@ -206,8 +209,7 @@ pub struct BoxListKey(pub ThreadId, pub RowId, pub bool);
 pub struct LabelListKey(pub ThreadId, pub RowId);
 
 impl Layout {
-    pub fn new(db: &Database, filter: Option<&str>) -> Layout {
-        assert!(filter.is_none());
+    pub fn new(db: &Database) -> Layout {
         let mut threads = layout(db);
         let mut tasks_by_name: VecDefaultMap<NameId, usize> = VecDefaultMap::new();
         for task in &db.tasks {
