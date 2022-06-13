@@ -317,9 +317,9 @@ impl RenderState {
         use rand::Rng;
         for _ in 0..256 {
             let (r, g, b) = hsl_to_rgb(
-                rng.gen_range(0.0, 1.0),
-                rng.gen_range(0.2, 0.5),
-                rng.gen_range(0.2, 0.3));
+                rng.gen_range(0.0 .. 1.0),
+                rng.gen_range(0.2 .. 0.5),
+                rng.gen_range(0.2 .. 0.3));
 
             colors.push((r, g, b, 1.0));
         }
